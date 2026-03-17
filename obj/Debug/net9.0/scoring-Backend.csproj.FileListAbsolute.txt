@@ -152,6 +152,7 @@ C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\ob
 C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\obj\Debug\net9.0\scoring-Backend.csproj.CoreCompileInputs.cache
 C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\obj\Debug\net9.0\scoring-Backend.MvcApplicationPartsAssemblyInfo.cs
 C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\obj\Debug\net9.0\scoring-Backend.MvcApplicationPartsAssemblyInfo.cache
+C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\obj\Debug\net9.0\scoring-Backend.sourcelink.json
 C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\obj\Debug\net9.0\scopedcss\bundle\scoring-Backend.styles.css
 C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\obj\Debug\net9.0\compressed\ia482s1opc-b9sayid5wm.gz
 C:\Users\ghozlene chaabane\Documents\Stage PFE\Projet-Scoring\scoring-Backend\obj\Debug\net9.0\compressed\yltlkwqxvg-61n19gt1b8.gz

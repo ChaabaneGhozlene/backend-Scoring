@@ -79,7 +79,6 @@ public async Task<IActionResult> HashAllPasswords()
     [HttpPost("logout")]
     public IActionResult Logout()
     {
-        HttpContext.Session.Clear();
         return Ok("Déconnecté");
     }
 }
