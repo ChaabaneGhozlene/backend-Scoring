@@ -94,8 +94,11 @@ builder.Services.AddScoped<IViewConfigRepository,  ViewConfigRepository>();
 builder.Services.AddScoped<IConfigurationCampagnesRepository, ConfigurationCampagnesRepository>();
 builder.Services.AddScoped<IAgentTeamRepository, AgentTeamRepository>();
 builder.Services.AddScoped<IAgentMailConfigRepository, AgentMailConfigRepository>();
-
-// ✅ Ajouter CORS
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    });
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>

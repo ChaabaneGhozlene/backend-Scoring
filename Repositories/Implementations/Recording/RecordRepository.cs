@@ -19,150 +19,187 @@ namespace scoring_Backend.Repositories.Implementations.Evaluation
             _adminDb = adminDb;
         }
 
-        public async Task<PagedRecordsDto> GetRecordsByFilterAsync(
-            RecordFilterDto filter, int userId, string userRole)
+      public async Task<PagedRecordsDto> GetRecordsByFilterAsync(
+    RecordFilterDto filter, int userId, string userRole)
+{
+    Console.WriteLine($"=== DEBUG === userId={userId}, userRole='{userRole}'");
+
+    var query = _db.RecordData.AsQueryable();
+
+    // ── Filtrage Agent (SQL) ──────────────────────────────────────────────
+    if (userRole == "Agent")
+    {
+        var agentOid = await _adminDb.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.Oid)
+            .FirstOrDefaultAsync();
+
+        query = agentOid != null
+            ? query.Where(r => r.AgentOid == agentOid)
+            : query.Where(r => false);
+    }
+
+    // ── Filtres date ──────────────────────────────────────────────────────
+    if (filter.DateDebut.HasValue)
+        query = query.Where(r => r.CallLocalTime >= filter.DateDebut.Value);
+    if (filter.DateFin.HasValue)
+        query = query.Where(r => r.CallLocalTime <= filter.DateFin.Value.AddDays(1).AddTicks(-1));
+
+    query = query.OrderByDescending(r => r.CallLocalTime);
+
+    var allRecords = await query.ToListAsync();
+
+    // ── Filtrage Admin / Supervisor par site (en mémoire) ─────────────────
+    if (userRole == "Admin" || userRole == "Supervisor")
+    {
+        var userSiteId = await _adminDb.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.SiteId)
+            .FirstOrDefaultAsync();
+
+        Console.WriteLine($"=== DEBUG SITE === userSiteId={userSiteId}");
+
+        if (userSiteId == null)
         {
-            Console.WriteLine($"=== DEBUG === userId={userId}, userRole='{userRole}'");
-
-            var query = _db.RecordData.AsQueryable();
-
-            if (userRole == "Agent")
-            {
-                var agentOid = await _adminDb.Users
-                    .Where(u => u.Id == userId)
-                    .Select(u => u.Oid)
-                    .FirstOrDefaultAsync();
-
-                query = agentOid != null
-                    ? query.Where(r => r.AgentOid == agentOid)
-                    : query.Where(r => false);
-            }
-
-            if (filter.DateDebut.HasValue)
-                query = query.Where(r => r.CallLocalTime >= filter.DateDebut.Value);
-            if (filter.DateFin.HasValue)
-                query = query.Where(r => r.CallLocalTime <= filter.DateFin.Value.AddDays(1).AddTicks(-1));
-
-            query = query.OrderByDescending(r => r.CallLocalTime);
-
-            var allRecords = await query.ToListAsync();
-
-            // ── Filtre AgentOids ──────────────────────────────────────────
-            if (filter.AgentOids != null && filter.AgentOids.Any())
-            {
-                var agentSet = new HashSet<string>(
-                    filter.AgentOids.Select(a => a.Trim()),
-                    StringComparer.OrdinalIgnoreCase);
-                allRecords = allRecords
-                    .Where(r => r.AgentOid != null && agentSet.Contains(r.AgentOid.Trim()))
-                    .ToList();
-            }
-
-            // ── Filtre colonnes dynamiques (MantineReactTable) ────────────
-            if (filter.ColumnFilters != null && filter.ColumnFilters.Any())
-            {
-                foreach (var cf in filter.ColumnFilters)
-                {
-                    var value = cf.Value?.ToLower()?.Trim();
-                    if (string.IsNullOrEmpty(value)) continue;
-
-                    allRecords = cf.Id switch
-                    {
-                        "nomAgent"            => allRecords.Where(r => r.NomAgent?.ToLower().Contains(value) == true).ToList(),
-                        "prenomAgent"         => allRecords.Where(r => r.PrenomAgent?.ToLower().Contains(value) == true).ToList(),
-                        "campaignDescription" => allRecords.Where(r => r.CampaignDescription?.ToLower().Contains(value) == true).ToList(),
-                        "callTypeDescription" => allRecords.Where(r => r.CallTypeDescription?.ToLower().Contains(value) == true).ToList(),
-                        "numeroTel"           => allRecords.Where(r => r.NumeroTel?.ToLower().Contains(value) == true).ToList(),
-                        "statusRequal"        => allRecords.Where(r => r.StatusRequal?.ToLower().Contains(value) == true).ToList(),
-                        "agentOid"            => allRecords.Where(r => r.AgentOid?.ToLower().Contains(value) == true).ToList(),
-                        "callLocalTime"       => allRecords.Where(r => r.CallLocalTimeString?.ToLower().Contains(value) == true).ToList(),
-                        "agentId"             => allRecords.Where(r => r.LastAgent != null && r.LastAgent.ToString()!.Contains(value)).ToList(),
-                        "lastAgent"           => allRecords.Where(r => r.LastAgent != null && r.LastAgent.ToString()!.Contains(value)).ToList(),
-                        "duration"            => allRecords.Where(r => r.Duration  != null && r.Duration.ToString()!.Contains(value)).ToList(),
-                        "typeRequalif"        => allRecords.Where(r => r.TypeRequalif?.ToString().ToLower().Contains(value) == true).ToList(),
-                        "lsId"                => allRecords.Where(r => r.LsId?.ToString().Contains(value) == true).ToList(),
-                        _                     => allRecords
-                    };
-                }
-            }
-
-            // ── Filtre utilisateur sauvegardé (FilterId) ─────────────────
-            // Utilise _db.Filtres (table [SQR_REC].[dbo].[Filtre])
-            if (filter.FilterId.HasValue && filter.FilterId.Value > 0)
-            {
-                var filtre = await _db.Filtres
-                    .Where(f => f.Id == filter.FilterId.Value)
-                    .FirstOrDefaultAsync();
-
-                Console.WriteLine($"=== FILTER === FilterId={filter.FilterId}, found={filtre != null}, expression='{filtre?.Expression}'");
-
-                if (filtre != null && !string.IsNullOrWhiteSpace(filtre.Expression))
-                    allRecords = ApplyUserFilterExpression(allRecords, filtre.Expression);
-            }
-
-            var totalCount = allRecords.Count;
-
-            int pageSize = filter.NbRecords.HasValue ? filter.NbRecords.Value : filter.PageSize;
-            int page     = filter.NbRecords.HasValue ? 1                      : filter.Page;
-
-            var recordsList = allRecords
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
-
-            // ── HasEvaluation ─────────────────────────────────────────────
-            var allSurveyIds = await _db.LsSurveys
-                .Where(s => s.RecordDataId != null)
-                .Select(s => s.RecordDataId!.Value)
+            Console.WriteLine("=== DEBUG SITE === Aucun site trouvé → 0 enregistrements");
+            allRecords = new List<RecordDatum>();
+        }
+        else
+        {
+            var siteAgentOids = await _adminDb.Users
+                .Where(u => u.SiteId == userSiteId && u.Oid != null)
+                .Select(u => u.Oid!)
                 .ToListAsync();
-            var evaluatedSet = new HashSet<int>(allSurveyIds);
 
-            // ── HasHistory (ap_action) ────────────────────────────────────
-            var allActionRecordIds = await _db.ApActions
-                .Where(a => a.RecordedId != null)
-                .Select(a => a.RecordedId!.Value)
-                .Distinct()
-                .ToListAsync();
-            var historySet = new HashSet<int>(allActionRecordIds);
+            Console.WriteLine($"=== DEBUG SITE === siteAgentOids count={siteAgentOids.Count}");
 
-            // ── HasHistoryScreen (vp_action) ──────────────────────────────
-            var allScreenIds = await _db.VpActions
-                .Where(a => a.RecordedId != null)
-                .Select(a => a.RecordedId!.Value)
-                .Distinct()
-                .ToListAsync();
-            var screenSet = new HashSet<int>(allScreenIds);
+            var siteAgentOidsSet = new HashSet<string>(
+                siteAgentOids, StringComparer.OrdinalIgnoreCase);
 
-            var recordsDto = recordsList.Select(r => new RecordDataDto
+            allRecords = siteAgentOidsSet.Any()
+                ? allRecords
+                    .Where(r => r.AgentOid != null && siteAgentOidsSet.Contains(r.AgentOid))
+                    .ToList()
+                : new List<RecordDatum>();
+        }
+    }
+    // SuperAdmin / SuperUser → allRecords non filtré, tout est visible
+
+    // ── Filtre AgentOids ──────────────────────────────────────────────────
+    if (filter.AgentOids != null && filter.AgentOids.Any())
+    {
+        var agentSet = new HashSet<string>(
+            filter.AgentOids.Select(a => a.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+        allRecords = allRecords
+            .Where(r => r.AgentOid != null && agentSet.Contains(r.AgentOid.Trim()))
+            .ToList();
+    }
+
+    // ── Filtre colonnes dynamiques (MantineReactTable) ────────────────────
+    if (filter.ColumnFilters != null && filter.ColumnFilters.Any())
+    {
+        foreach (var cf in filter.ColumnFilters)
+        {
+            var value = cf.Value?.ToLower()?.Trim();
+            if (string.IsNullOrEmpty(value)) continue;
+
+            allRecords = cf.Id switch
             {
-                Id                  = r.Id,
-                CampaignDescription = r.CampaignDescription,
-                AgentOid            = r.AgentOid,
-                NomAgent            = r.NomAgent,
-                PrenomAgent         = r.PrenomAgent,
-                CallLocalTime       = r.CallLocalTime,
-                CallLocalTimeString = r.CallLocalTimeString,
-                StatusRequal        = r.StatusRequal,
-                StatusDescription   = r.StatusDescription,
-                CallTypeDescription = r.CallTypeDescription,
-                NumeroTel           = r.NumeroTel,
-                AgentId             = r.LastAgent,
-                Duration            = r.Duration,
-                HasEvaluation       = evaluatedSet.Contains(r.Id),
-                HasHistory          = historySet.Contains(r.Id),
-                HasHistoryScreen    = screenSet.Contains(r.Id),
-                LsId                = r.LsId,
-                TypeRequalif        = r.TypeRequalif
-            }).ToList();
-
-            return new PagedRecordsDto
-            {
-                Records    = recordsDto,
-                TotalCount = totalCount,
-                Page       = page,
-                PageSize   = pageSize
+                "nomAgent"            => allRecords.Where(r => r.NomAgent?.ToLower().Contains(value) == true).ToList(),
+                "prenomAgent"         => allRecords.Where(r => r.PrenomAgent?.ToLower().Contains(value) == true).ToList(),
+                "campaignDescription" => allRecords.Where(r => r.CampaignDescription?.ToLower().Contains(value) == true).ToList(),
+                "callTypeDescription" => allRecords.Where(r => r.CallTypeDescription?.ToLower().Contains(value) == true).ToList(),
+                "numeroTel"           => allRecords.Where(r => r.NumeroTel?.ToLower().Contains(value) == true).ToList(),
+                "statusRequal"        => allRecords.Where(r => r.StatusRequal?.ToLower().Contains(value) == true).ToList(),
+                "agentOid"            => allRecords.Where(r => r.AgentOid?.ToLower().Contains(value) == true).ToList(),
+                "callLocalTime"       => allRecords.Where(r => r.CallLocalTimeString?.ToLower().Contains(value) == true).ToList(),
+                "agentId"             => allRecords.Where(r => r.LastAgent != null && r.LastAgent.ToString()!.Contains(value)).ToList(),
+                "lastAgent"           => allRecords.Where(r => r.LastAgent != null && r.LastAgent.ToString()!.Contains(value)).ToList(),
+                "duration"            => allRecords.Where(r => r.Duration  != null && r.Duration.ToString()!.Contains(value)).ToList(),
+                "typeRequalif"        => allRecords.Where(r => r.TypeRequalif?.ToString().ToLower().Contains(value) == true).ToList(),
+                "lsId"                => allRecords.Where(r => r.LsId?.ToString().Contains(value) == true).ToList(),
+                _                     => allRecords
             };
         }
+    }
+
+    // ── Filtre utilisateur sauvegardé (FilterId) ──────────────────────────
+    if (filter.FilterId.HasValue && filter.FilterId.Value > 0)
+    {
+        var filtre = await _db.Filtres
+            .Where(f => f.Id == filter.FilterId.Value)
+            .FirstOrDefaultAsync();
+
+        Console.WriteLine($"=== FILTER === FilterId={filter.FilterId}, found={filtre != null}, expression='{filtre?.Expression}'");
+
+        if (filtre != null && !string.IsNullOrWhiteSpace(filtre.Expression))
+            allRecords = ApplyUserFilterExpression(allRecords, filtre.Expression);
+    }
+
+    var totalCount = allRecords.Count;
+
+    int pageSize = filter.NbRecords.HasValue ? filter.NbRecords.Value : filter.PageSize;
+    int page     = filter.NbRecords.HasValue ? 1                      : filter.Page;
+
+    var recordsList = allRecords
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .ToList();
+
+    // ── HasEvaluation ─────────────────────────────────────────────────────
+    var allSurveyIds = await _db.LsSurveys
+        .Where(s => s.RecordDataId != null)
+        .Select(s => s.RecordDataId!.Value)
+        .ToListAsync();
+    var evaluatedSet = new HashSet<int>(allSurveyIds);
+
+    // ── HasHistory (ap_action) ────────────────────────────────────────────
+    var allActionRecordIds = await _db.ApActions
+        .Where(a => a.RecordedId != null)
+        .Select(a => a.RecordedId!.Value)
+        .Distinct()
+        .ToListAsync();
+    var historySet = new HashSet<int>(allActionRecordIds);
+
+    // ── HasHistoryScreen (vp_action) ──────────────────────────────────────
+    var allScreenIds = await _db.VpActions
+        .Where(a => a.RecordedId != null)
+        .Select(a => a.RecordedId!.Value)
+        .Distinct()
+        .ToListAsync();
+    var screenSet = new HashSet<int>(allScreenIds);
+
+    var recordsDto = recordsList.Select(r => new RecordDataDto
+    {
+        Id                  = r.Id,
+        CampaignDescription = r.CampaignDescription,
+        AgentOid            = r.AgentOid,
+        NomAgent            = r.NomAgent,
+        PrenomAgent         = r.PrenomAgent,
+        CallLocalTime       = r.CallLocalTime,
+        CallLocalTimeString = r.CallLocalTimeString,
+        StatusRequal        = r.StatusRequal,
+        StatusDescription   = r.StatusDescription,
+        CallTypeDescription = r.CallTypeDescription,
+        NumeroTel           = r.NumeroTel,
+        AgentId             = r.LastAgent,
+        Duration            = r.Duration,
+        HasEvaluation       = evaluatedSet.Contains(r.Id),
+        HasHistory          = historySet.Contains(r.Id),
+        HasHistoryScreen    = screenSet.Contains(r.Id),
+        LsId                = r.LsId,
+        TypeRequalif        = r.TypeRequalif
+    }).ToList();
+
+    return new PagedRecordsDto
+    {
+        Records    = recordsDto,
+        TotalCount = totalCount,
+        Page       = page,
+        PageSize   = pageSize
+    };
+}
 
         // ══════════════════════════════════════════════
         //  APPLIQUE L'EXPRESSION DU FILTRE UTILISATEUR
