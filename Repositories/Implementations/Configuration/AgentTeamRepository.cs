@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using scoring_Backend.DTO;
@@ -35,31 +36,50 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
         // GROUPES (tListAgentTeam)
         // ════════════════════════════════════════════════════════════════════
 
-        public async Task<IEnumerable<AgentTeamDto>> GetAllTeamsAsync()
-        {
-            // Jointure avec tListAgents pour récupérer le libellé du site
-            const string sql = @"
-                SELECT  t.Id,
-                        t.Description,
-                        t.IdSite,
-                        ISNULL(s.customer, '') AS SiteDescription
-                FROM    dbo.tListAgentTeam t
-                LEFT JOIN (
-                    SELECT DISTINCT customerId, customer
-                    FROM   dbo.tListAgents
-                ) s ON s.customerId = t.IdSite
-                ORDER BY t.Description";
+   public async Task<IEnumerable<AgentTeamDto>> GetAllTeamsAsync(int userId, string userRole)
+{
+    bool seeAll = userRole == "SuperAdmin";
 
-            var list = new List<AgentTeamDto>();
-            await using var conn = OpenConnection();
-            await conn.OpenAsync();
-            await using var cmd  = new SqlCommand(sql, conn);
-            await using var rdr  = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-                list.Add(MapTeam(rdr));
-            return list;
-        }
+    string sql = seeAll
+        ? @"SELECT  t.Id,
+                    t.Description,
+                    t.IdSite,
+                    ISNULL(s.customer, '') AS SiteDescription
+            FROM    dbo.tListAgentTeam t
+            LEFT JOIN (
+                SELECT DISTINCT customerId, customer
+                FROM   dbo.tListAgents
+            ) s ON s.customerId = t.IdSite
+            ORDER BY t.Description"
 
+        : @"SELECT  t.Id,
+                    t.Description,
+                    t.IdSite,
+                    ISNULL(s.customer, '') AS SiteDescription
+            FROM    dbo.tListAgentTeam t
+            LEFT JOIN (
+                SELECT DISTINCT customerId, customer
+                FROM   dbo.tListAgents
+            ) s ON s.customerId = t.IdSite
+            INNER JOIN [SQR_Admin].[dbo].[Users] u
+                    ON u.Id     = @UserId
+                   AND u.SiteId = t.IdSite
+            ORDER BY t.Description";
+
+    var list = new List<AgentTeamDto>();
+    await using var conn = OpenConnection();
+    await conn.OpenAsync();
+    await using var cmd = new SqlCommand(sql, conn);
+
+    if (!seeAll)
+        cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+
+    await using var rdr = await cmd.ExecuteReaderAsync();
+    while (await rdr.ReadAsync())
+        list.Add(MapTeam(rdr));
+
+    return list;
+}
         public async Task<AgentTeamDto?> GetTeamByIdAsync(int id)
         {
             const string sql = @"
@@ -328,22 +348,36 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
         /// Liste des sites distincts depuis tListAgents.
         /// Reprend la logique de GetSite() (rôle Admin → tous les sites).
         /// </summary>
-        public async Task<IEnumerable<AgentSiteDto>> GetSitesAsync()
-        {
-            const string sql = @"
-                SELECT DISTINCT customerId AS Id, customer AS Description
-                FROM   dbo.tListAgents
-                ORDER BY Description";
+      public async Task<IEnumerable<AgentSiteDto>> GetSitesAsync(int userId, string userRole)
+{
+    bool seeAll = userRole == "SuperAdmin";
 
-            var list = new List<AgentSiteDto>();
-            await using var conn = OpenConnection();
-            await conn.OpenAsync();
-            await using var cmd  = new SqlCommand(sql, conn);
-            await using var rdr  = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-                list.Add(new AgentSiteDto(rdr.GetInt32(0), rdr.GetString(1)));
-            return list;
-        }
+    string sql = seeAll
+        ? @"SELECT DISTINCT customerId AS Id, customer AS Description
+            FROM   dbo.tListAgents
+            ORDER BY Description"
+
+        : @"SELECT DISTINCT la.customerId AS Id, la.customer AS Description
+            FROM   dbo.tListAgents la
+            INNER JOIN [SQR_Admin].[dbo].[Users] u
+                    ON u.Id     = @UserId
+                   AND u.SiteId = la.customerId
+            ORDER BY Description";
+
+    var list = new List<AgentSiteDto>();
+    await using var conn = OpenConnection();
+    await conn.OpenAsync();
+    await using var cmd = new SqlCommand(sql, conn);
+
+    if (!seeAll)
+        cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+
+    await using var rdr = await cmd.ExecuteReaderAsync();
+    while (await rdr.ReadAsync())
+        list.Add(new AgentSiteDto(rdr.GetInt32(0), rdr.GetString(1)));
+
+    return list;
+}
 
         // ════════════════════════════════════════════════════════════════════
         // HELPERS PRIVÉS

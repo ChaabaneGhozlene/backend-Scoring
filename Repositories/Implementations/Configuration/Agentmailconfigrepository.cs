@@ -29,65 +29,63 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
         // ──────────────────────────────────────────────────────────────────────
         // GET liste agents
         // ─── CHANGEMENT : paramètre string userRole (au lieu de int) ──────────
-        // SuperAdmin / AdminSite → tous les agents (pas de filtre UserId)
+        // SuperAdmin  → tous les agents (pas de filtre UserId)
         // Superviseur / Agent   → agents liés via UsersAgent WHERE UserId=@UserId
         // ──────────────────────────────────────────────────────────────────────
-        public async Task<IEnumerable<AgentMailConfigDto>> GetAgentsWithEmailAsync(
-            int userId, string userRole)   // ← string, correspond à l'interface
+       public async Task<IEnumerable<AgentMailConfigDto>> GetAgentsWithEmailAsync(
+    int userId, string userRole)
+{
+    var result = new List<AgentMailConfigDto>();
+
+    bool seeAll = userRole == "SuperAdmin";
+
+    string sql = seeAll
+        ? @"SELECT la.Ident AS Id,
+                   la.Oid   AS Oid,
+                   CONCAT(la.Prenom, ' ', la.Nom) AS Agent,
+                   lae.Email AS Email
+            FROM   [dbo].[tListAgents] la
+            LEFT JOIN [dbo].[tListAgentEmail] lae
+                   ON la.Oid   = lae.OIDAgent
+                  AND la.Ident = lae.IdAgent"
+
+        : @"SELECT DISTINCT
+                   la.Ident AS Id,
+                   la.Oid   AS Oid,
+                   CONCAT(la.Prenom, ' ', la.Nom) AS Agent,
+                   lae.Email AS Email
+            FROM   [dbo].[tListAgents] la
+            LEFT JOIN [dbo].[tListAgentEmail] lae
+                   ON la.Oid   = lae.OIDAgent
+                  AND la.Ident = lae.IdAgent
+            INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua
+                   ON la.Ident = ua.AgentId
+            WHERE  ua.UserId = @UserId";
+
+    await using var conn = new SqlConnection(_connectionString);
+    await using var cmd  = new SqlCommand(sql, conn);
+
+    if (!seeAll)
+        cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+
+    await conn.OpenAsync();
+    await using var reader = await cmd.ExecuteReaderAsync();
+
+    while (await reader.ReadAsync())
+    {
+        result.Add(new AgentMailConfigDto
         {
-            var result = new List<AgentMailConfigDto>();
+            Id    = reader.GetInt32(reader.GetOrdinal("Id")),
+            Oid   = reader.GetString(reader.GetOrdinal("Oid")),
+            Agent = reader.GetString(reader.GetOrdinal("Agent")),
+            Email = reader.IsDBNull(reader.GetOrdinal("Email"))
+                        ? null
+                        : reader.GetString(reader.GetOrdinal("Email")).Trim()
+        });
+    }
 
-            // SuperAdmin et AdminSite voient tous les agents sans filtre
-            bool seeAll = userRole == "SuperAdmin" || userRole == "AdminSite";
-
-            string sql = seeAll
-                ? @"SELECT la.Ident AS Id,
-                           la.Oid   AS Oid,
-                           CONCAT(la.Prenom, ' ', la.Nom) AS Agent,
-                           lae.Email AS Email
-                    FROM   [dbo].[tListAgents] la
-                    LEFT JOIN [dbo].[tListAgentEmail] lae
-                           ON la.Oid   = lae.OIDAgent
-                          AND la.Ident = lae.IdAgent"
-
-                : @"SELECT DISTINCT
-                           la.Ident AS Id,
-                           la.Oid   AS Oid,
-                           CONCAT(la.Prenom, ' ', la.Nom) AS Agent,
-                           lae.Email AS Email
-                    FROM   [dbo].[tListAgents] la
-                    LEFT JOIN [dbo].[tListAgentEmail] lae
-                           ON la.Oid   = lae.OIDAgent
-                          AND la.Ident = lae.IdAgent
-                    INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua
-                           ON la.Ident = ua.AgentId
-                    WHERE  ua.UserId = @UserId";
-
-            await using var conn = new SqlConnection(_connectionString);
-            await using var cmd  = new SqlCommand(sql, conn);
-
-            if (!seeAll)
-                cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
-
-            await conn.OpenAsync();
-            await using var reader = await cmd.ExecuteReaderAsync();
-
-            while (await reader.ReadAsync())
-            {
-                result.Add(new AgentMailConfigDto
-                {
-                    Id    = reader.GetInt32(reader.GetOrdinal("Id")),
-                    Oid   = reader.GetString(reader.GetOrdinal("Oid")),
-                    Agent = reader.GetString(reader.GetOrdinal("Agent")),
-                    Email = reader.IsDBNull(reader.GetOrdinal("Email"))
-                                ? null
-                                : reader.GetString(reader.GetOrdinal("Email")).Trim()
-                });
-            }
-
-            return result;
-        }
-
+    return result;
+}
         // ──────────────────────────────────────────────────────────────────────
         // GET détail agent pour popup édition (inchangé)
         // ──────────────────────────────────────────────────────────────────────

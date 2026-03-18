@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using scoring_Backend.DTO;
@@ -21,10 +22,31 @@ namespace scoring_Backend.Controllers.Configuration
         }
 
         // ── Lookups ──────────────────────────────────────────────────────────
+ private (int userId, string userRole) GetUserContext()
+        {
+            // Log tous les claims pour déboguer
+            foreach (var claim in User.Claims)
+                _logger.LogInformation("Claim: {Type} = {Value}", claim.Type, claim.Value);
 
-        [HttpGet("sites")]
-        public async Task<IActionResult> GetSites()
-            => Ok(await _repo.GetSitesAsync());
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                         ?? User.FindFirstValue("sub")
+                         ?? User.FindFirstValue("userId");
+
+            var userRole  = User.FindFirstValue(ClaimTypes.Role)
+                         ?? User.FindFirstValue("role")
+                         ?? User.FindFirstValue("userRole")
+                         ?? "Agent";
+
+            if (userIdStr is null || !int.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException("Claim userId introuvable ou invalide.");
+
+            return (userId, userRole);
+        }
+        [HttpGet("sites")]public async Task<IActionResult> GetSites()
+{
+    var (userId, userRole) = GetUserContext();
+    return Ok(await _repo.GetSitesAsync(userId, userRole));
+}
 
         [HttpGet("available-agents")]
         public async Task<IActionResult> GetAvailableAgents(
@@ -35,8 +57,22 @@ namespace scoring_Backend.Controllers.Configuration
         // ── Groupes ───────────────────────────────────────────────────────────
 
         [HttpGet]
-        public async Task<IActionResult> GetAllTeams()
-            => Ok(await _repo.GetAllTeamsAsync());
+public async Task<IActionResult> GetAllTeams()
+{try
+            {
+                var (userId, userRole) = GetUserContext();
+                return Ok(await _repo.GetAllTeamsAsync(userId, userRole));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erreur GetAllTeams");
+                return StatusCode(500, new { message = ex.Message, detail = ex.InnerException?.Message });
+            }
+}
 
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetTeam(int id)

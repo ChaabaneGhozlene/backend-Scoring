@@ -5,7 +5,12 @@ namespace scoring_Backend.Repositories.Interfaces.Configuration
     public interface IAgentTeamRepository
     {
         // ── Groupes ──────────────────────────────────────────────────────────
-        Task<IEnumerable<AgentTeamDto>>       GetAllTeamsAsync();
+
+        /// <summary>
+        /// SuperAdmin → tous les groupes.
+        /// Autres rôles → uniquement les groupes du site de l'utilisateur connecté.
+        /// </summary>
+        Task<IEnumerable<AgentTeamDto>>       GetAllTeamsAsync(int userId, string userRole);
         Task<AgentTeamDto?>                   GetTeamByIdAsync(int id);
         Task<bool>                            TeamExistsByDescriptionAsync(string description);
         Task<int>                             CreateTeamAsync(CreateAgentTeamDto dto);
@@ -25,8 +30,12 @@ namespace scoring_Backend.Repositories.Interfaces.Configuration
         Task<IEnumerable<AvailableAgentDto>>  GetAvailableAgentsAsync(
             int customerId, int? excludeTeamId = null);
 
-        /// <summary>Sites distincts (customerId + customer) depuis tListAgents.</summary>
-        Task<IEnumerable<AgentSiteDto>>       GetSitesAsync();
+        /// <summary>
+        /// SuperAdmin → tous les sites distincts.
+        /// Autres rôles → uniquement le site de l'utilisateur connecté.
+        /// </summary>
+        Task<IEnumerable<AgentSiteDto>>       GetSitesAsync(int userId, string userRole);
+
         Task RemoveMembersAsync(int teamId, IEnumerable<string> agentOids);
     }
 }
