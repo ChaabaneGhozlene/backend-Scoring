@@ -1,0 +1,191 @@
+﻿using System;
+using System.Collections.Generic;
+
+namespace scoring_Backend.Models.Scoring;
+
+public partial class VwlistLsSurveyGv
+{
+    public int Id { get; set; }
+
+    public string? RecDate { get; set; }
+
+    public string? RecTime { get; set; }
+
+    public string? RecIdent { get; set; }
+
+    public string? RecCampType { get; set; }
+
+    public int? RecNumCamp { get; set; }
+
+    public string? CampaignDescription { get; set; }
+
+    public int? RecIdLink { get; set; }
+
+    public int? RecType { get; set; }
+
+    public string? CallTypeDescription { get; set; }
+
+    public string? RecComment { get; set; }
+
+    public string? RecFilename { get; set; }
+
+    public int? CustomerId { get; set; }
+
+    public string? CustomerDescription { get; set; }
+
+    public int? LastAgent { get; set; }
+
+    public string? NomAgent { get; set; }
+
+    public string? PrenomAgent { get; set; }
+
+    public string? NumeroTel { get; set; }
+
+    public string? CallLocalTimeString { get; set; }
+
+    public int? Duration { get; set; }
+
+    public int? CallDuration { get; set; }
+
+    public int? ConvDuration { get; set; }
+
+    public int? WaitDuration { get; set; }
+
+    public int? TotalWaitDuration { get; set; }
+
+    public int? CallStatusGroup { get; set; }
+
+    public int? CallStatusNum { get; set; }
+
+    public int? CallStatusDetail { get; set; }
+
+    public string? StatusText { get; set; }
+
+    public int? StatusGroupeRequal { get; set; }
+
+    public int? StatusNumRequal { get; set; }
+
+    public int? StatusDetailRequal { get; set; }
+
+    public string? StatusRequal { get; set; }
+
+    public int? TypeRequalif { get; set; }
+
+    public string? DateImport { get; set; }
+
+    public int? TypeImport { get; set; }
+
+    public string? Ani { get; set; }
+
+    public string? Dnis { get; set; }
+
+    public string? RecordSource { get; set; }
+
+    public string? RecordArchive { get; set; }
+
+    public int? RecordStatusId { get; set; }
+
+    public string? DateTransfert { get; set; }
+
+    public string? DateArchive { get; set; }
+
+    public DateTime? RecordDate { get; set; }
+
+    public string? RecordTime { get; set; }
+
+    public DateTime? CallLocalTime { get; set; }
+
+    public string? RecordSourceOld { get; set; }
+
+    public string? RecCallId { get; set; }
+
+    public string? RecCampaignDescription { get; set; }
+
+    public string? FullRecFilename { get; set; }
+
+    public string? FullRecFilenameBackup { get; set; }
+
+    public int? RecExec { get; set; }
+
+    public string? StatusDescription { get; set; }
+
+    public string? StatusGroupDescription { get; set; }
+
+    public string? CallStatusGroupDescription { get; set; }
+
+    public string? CallStatusNumDescription { get; set; }
+
+    public string? CallStatusDetailDescription { get; set; }
+
+    public string? CampaignId { get; set; }
+
+    public string? RecFilenameTmp { get; set; }
+
+    public string? AgentOid { get; set; }
+
+    public int? LsId { get; set; }
+
+    public string? Memo { get; set; }
+
+    public int? LsSurveyAgentIdLs { get; set; }
+
+    public int? LsSurveyCreateBy { get; set; }
+
+    public DateTime? LsSurveyCreateDate { get; set; }
+
+    public int? LsSurveyId { get; set; }
+
+    public int? LsSurveyIdCallReason { get; set; }
+
+    public int? LsSurveyIdCategories { get; set; }
+
+    public int? LsSurveyIsSaved { get; set; }
+
+    public int? LsSurveyLsId { get; set; }
+
+    public string? LsSurveyMemo { get; set; }
+
+    public string? LsSurveyMemoActionTaken { get; set; }
+
+    public float? LsSurveyScore { get; set; }
+
+    public int? LsSurveyUpdateBy { get; set; }
+
+    public DateTime? LsSurveyUpdateDate { get; set; }
+
+    public int? LsLsId { get; set; }
+
+    public string? LsLsuserName { get; set; }
+
+    public string? LsCcampagneDid { get; set; }
+
+    public int? LsCsite { get; set; }
+
+    public int? LsCid { get; set; }
+
+    public string? TListCategoriesDesCategories { get; set; }
+
+    public string? ListCallReasonDesCallReason { get; set; }
+
+    public string? ScreenSource { get; set; }
+
+    public string? GvListenedImgName { get; set; }
+
+    public string? GvListenedToolTip { get; set; }
+
+    public string? GvTrashImgName { get; set; }
+
+    public string? GvTrashToolTip { get; set; }
+
+    public string? GvEvalImgName { get; set; }
+
+    public string? GvEvalToolTip { get; set; }
+
+    public string? GvWatchedImgName { get; set; }
+
+    public string? GvWatchedToolTip { get; set; }
+
+    public int? TotalListnedseconde { get; set; }
+
+    public int TotalListnedtime { get; set; }
+}
