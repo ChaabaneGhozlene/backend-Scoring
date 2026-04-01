@@ -168,7 +168,11 @@ public partial class SqrScoringContext : DbContext
     public virtual DbSet<XViewDailyImport> XViewDailyImports { get; set; }
 
     public virtual DbSet<XViewRecordDaily> XViewRecordDailies { get; set; }
-
+// AppDbContext.cs
+public DbSet<ReportTemplate> ReportTemplates => Set<ReportTemplate>();
+public DbSet<ColumnDefinition> ColumnDefinitions => Set<ColumnDefinition>();
+public DbSet<FilterDefinition> FilterDefinitions => Set<FilterDefinition>();
+public DbSet<ChartConfiguration> ChartConfigurations => Set<ChartConfiguration>();
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
 #warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
         => optionsBuilder.UseSqlServer("Server=localhost\\SQLEXPRESS;Database=SQR_REC;Trusted_Connection=True;TrustServerCertificate=True;");

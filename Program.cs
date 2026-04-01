@@ -89,11 +89,14 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<IRecordRepository, RecordRepository>();
-builder.Services.AddScoped<IFilterRepository, FilterRepository>();
 builder.Services.AddScoped<IViewConfigRepository,  ViewConfigRepository>();
 builder.Services.AddScoped<IConfigurationCampagnesRepository, ConfigurationCampagnesRepository>();
 builder.Services.AddScoped<IAgentTeamRepository, AgentTeamRepository>();
 builder.Services.AddScoped<IAgentMailConfigRepository, AgentMailConfigRepository>();
+builder.Services.AddScoped<IEvaluationListRepository, EvaluationListRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+// ✅ Enregistrement du repository Evaluation
+builder.Services.AddScoped<IEvaluationRepository, EvaluationRepository>();
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {

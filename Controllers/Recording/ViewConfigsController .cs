@@ -20,26 +20,26 @@ namespace scoring_Backend.Controllers.Evaluation
         private string CurrentUserLogin =>
             User.FindFirstValue(ClaimTypes.Name) ?? string.Empty;
 
-        // GET /api/viewconfigs
-        [HttpGet]
-        public async Task<IActionResult> GetAll() =>
-            Ok(await _repo.GetUserConfigsAsync(CurrentUserLogin));
+       // GET /api/viewconfigs?groupe=1  ou  ?groupe=2
+[HttpGet]
+public async Task<IActionResult> GetAll([FromQuery] int groupe = 1)  // ← param avec défaut
+    => Ok(await _repo.GetUserConfigsAsync(CurrentUserLogin, groupe));
 
-        // POST /api/viewconfigs
-        [HttpPost]
-        public async Task<IActionResult> Create([FromBody] CreateViewConfigDto dto)
-        {
-            if (!ModelState.IsValid) return BadRequest(ModelState);
-            try
-            {
-                var created = await _repo.CreateConfigAsync(CurrentUserLogin, dto);
-                return CreatedAtAction(nameof(GetAll), new { id = created.Id }, created);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new { message = ex.Message });
-            }
-        }
+// POST /api/viewconfigs  — le body contient déjà groupe via CreateViewConfigDto
+[HttpPost]
+public async Task<IActionResult> Create([FromBody] CreateViewConfigDto dto)
+{
+    if (!ModelState.IsValid) return BadRequest(ModelState);
+    try
+    {
+        var created = await _repo.CreateConfigAsync(CurrentUserLogin, dto);
+        return CreatedAtAction(nameof(GetAll), new { id = created.Id }, created);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Conflict(new { message = ex.Message });
+    }
+}
 
         // PUT /api/viewconfigs/{id}
         [HttpPut("{id:int}")]

@@ -28,6 +28,7 @@ namespace scoring_Backend.DTO
         public          string? Expression { get; set; }
         public          string? SqlWhere   { get; set; }
         public          int     Type       { get; set; } = 1;
+        public int    Groupe     { get; set; }
     }
 
     // ══════════════════════════════════════════════
@@ -39,12 +40,14 @@ namespace scoring_Backend.DTO
         public int    Id         { get; set; }
         public string Name       { get; set; } = string.Empty;
         public string LayoutJson { get; set; } = string.Empty;
+         public int    Groupe     { get; set; }  
     }
 
     public class CreateViewConfigDto
     {
         [Required] public string Name       { get; set; } = string.Empty;
         [Required] public string LayoutJson { get; set; } = string.Empty;
+         public int    Groupe     { get; set; } = 1;
     }
 
     public class UpdateLayoutDto

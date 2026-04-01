@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using scoring_Backend.DTO;
 using scoring_Backend.Repositories.Interfaces.Evaluation;
-
+using System.IO.Compression;
 namespace scoring_Backend.Controllers
 {
     [ApiController]
@@ -131,5 +131,25 @@ public async Task<IActionResult> DeleteRecord(int id)
         return StatusCode(500, new { message = ex.Message });
     }
 }
-}
+
+// ══════════════════════════════════════════════
+        // GET /api/records/{id}/stream  →  audio
+        // ══════════════════════════════════════════════
+        [HttpGet("{id:int}/stream")]
+        public async Task<IActionResult> StreamRecord(int id)
+        {
+            try
+            {
+                var path = await _recordRepo.GetRecordSourceAsync(id);
+                if (path == null || !System.IO.File.Exists(path))
+                    return NotFound("Fichier audio introuvable.");
+
+                var stream = System.IO.File.OpenRead(path);
+                return File(stream, "audio/mpeg", enableRangeProcessing: true);
+            }
+            catch (Exception ex) { return StatusCode(500, new { message = ex.Message }); }
+        }
+
+       
+    }
 }

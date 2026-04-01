@@ -40,11 +40,19 @@ namespace scoring_Backend.Repositories.Implementations.Evaluation
     }
 
     // ── Filtres date ──────────────────────────────────────────────────────
-    if (filter.DateDebut.HasValue)
-        query = query.Where(r => r.CallLocalTime >= filter.DateDebut.Value);
-    if (filter.DateFin.HasValue)
-        query = query.Where(r => r.CallLocalTime <= filter.DateFin.Value.AddDays(1).AddTicks(-1));
+   var dtFrom = filter.DateDebut.HasValue
+    ? new DateTime(filter.DateDebut.Value.Year, filter.DateDebut.Value.Month, filter.DateDebut.Value.Day, 0, 0, 0)
+    : (DateTime?)null;
 
+var dtTo = filter.DateFin.HasValue
+    ? new DateTime(filter.DateFin.Value.Year, filter.DateFin.Value.Month, filter.DateFin.Value.Day, 23, 59, 59)
+    : (DateTime?)null;
+
+if (dtFrom.HasValue)
+    query = query.Where(r => r.CallLocalTime >= dtFrom.Value);
+
+if (dtTo.HasValue)
+    query = query.Where(r => r.CallLocalTime <= dtTo.Value);
     query = query.OrderByDescending(r => r.CallLocalTime);
 
     var allRecords = await query.ToListAsync();
