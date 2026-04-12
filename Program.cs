@@ -12,6 +12,8 @@ using scoring_Backend.Repositories;
 using scoring_Backend.Repositories.Implementations.Evaluation;
 using scoring_Backend.Repositories.Interfaces.Configuration;
 using scoring_Backend.Repositories.Implementations.Configuration;
+using scoring_Backend.Repositories.Interfaces.Statistique;
+using scoring_Backend.Repositories.Implementations.Statistique;
 IdentityModelEventSource.ShowPII = true;
 var builder = WebApplication.CreateBuilder(args);
 /*builder.Services.AddHttpContextAccessor();
@@ -49,15 +51,26 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
        options.Events = new JwtBearerEvents
 {
     OnMessageReceived = context =>
+{
+    // ✅ Lire depuis query string en priorité (pour les streams vidéo)
+    var queryToken = context.Request.Query["token"].FirstOrDefault();
+    if (!string.IsNullOrEmpty(queryToken))
     {
-        var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
-        {
-            context.Token = authHeader.Substring("Bearer ".Length).Trim();
-        }
-        Console.WriteLine("TOKEN EXTRACTED: [" + context.Token + "]");
+        context.Token = queryToken;
+        Console.WriteLine("TOKEN FROM QUERY: [" + context.Token + "]");
         return Task.CompletedTask;
-    },
+    }
+
+    // Sinon lire depuis le header Authorization
+    var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+    if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
+    {
+        context.Token = authHeader.Substring("Bearer ".Length).Trim();
+    }
+
+    Console.WriteLine("TOKEN EXTRACTED: [" + context.Token + "]");
+    return Task.CompletedTask;
+},
     OnAuthenticationFailed = context =>
     {
         Console.WriteLine("JWT ERROR: " + context.Exception.Message);
@@ -95,8 +108,10 @@ builder.Services.AddScoped<IAgentTeamRepository, AgentTeamRepository>();
 builder.Services.AddScoped<IAgentMailConfigRepository, AgentMailConfigRepository>();
 builder.Services.AddScoped<IEvaluationListRepository, EvaluationListRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
-// ✅ Enregistrement du repository Evaluation
+builder.Services.AddScoped<IStatistiqueRepository, StatistiqueRepository>();
 builder.Services.AddScoped<IEvaluationRepository, EvaluationRepository>();
+// Ajouter avec vos autres services
+builder.Services.AddScoped<IUserDashboardRepository, UserDashboardRepository>();
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -109,6 +124,13 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader()
               .AllowAnyMethod());
 });
+builder.Services.AddDbContext<SqrScoringContext>(options =>
+    options
+        .UseSqlServer(builder.Configuration.GetConnectionString("SqrScoring"))
+        .LogTo(Console.WriteLine, new[] { DbLoggerCategory.Database.Command.Name },
+               LogLevel.Information)
+        .EnableSensitiveDataLogging()
+);
 Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = true;
 var app = builder.Build();
 

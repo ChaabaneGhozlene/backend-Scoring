@@ -35,7 +35,7 @@ namespace scoring_Backend.DTO
         public string   AgentOid     { get; set; } = string.Empty;
         public int      AgentId      { get; set; }          // LastAgent (numéro)
         public int      Auditor      { get; set; }
-        public string   AuditorName  { get; set; } = string.Empty;
+        public string   AuditorName  { get; set; } = "";
         public DateTime StartPeriode { get; set; }
         public DateTime EndPeriode   { get; set; }
         public DateTime CreateDate   { get; set; }

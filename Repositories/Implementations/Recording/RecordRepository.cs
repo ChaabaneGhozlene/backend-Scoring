@@ -157,7 +157,7 @@ if (dtTo.HasValue)
 
     // ── HasEvaluation ─────────────────────────────────────────────────────
     var allSurveyIds = await _db.LsSurveys
-        .Where(s => s.RecordDataId != null)
+.Where(s => s.RecordDataId != null && s.IsSaved == 1)
         .Select(s => s.RecordDataId!.Value)
         .ToListAsync();
     var evaluatedSet = new HashSet<int>(allSurveyIds);
@@ -171,12 +171,17 @@ if (dtTo.HasValue)
     var historySet = new HashSet<int>(allActionRecordIds);
 
     // ── HasHistoryScreen (vp_action) ──────────────────────────────────────
-    var allScreenIds = await _db.VpActions
-        .Where(a => a.RecordedId != null)
-        .Select(a => a.RecordedId!.Value)
-        .Distinct()
-        .ToListAsync();
-    var screenSet = new HashSet<int>(allScreenIds);
+var allScreenActions = await _db.VpActions
+    .Where(a => a.RecordedId != null && a.ScreenFileName != null)
+    .Select(a => new { a.RecordedId, a.ScreenFileName })
+    .ToListAsync();
+
+var screenSet = new HashSet<int>(
+    allScreenActions.Select(a => a.RecordedId!.Value).Distinct());
+
+// ── ScreenSource depuis VWListRecordGV ────────────────────────────────────
+var recordIds = recordsList.Select(r => r.Id).ToList();
+
 
     var recordsDto = recordsList.Select(r => new RecordDataDto
     {
@@ -197,7 +202,9 @@ if (dtTo.HasValue)
         HasHistory          = historySet.Contains(r.Id),
         HasHistoryScreen    = screenSet.Contains(r.Id),
         LsId                = r.LsId,
-        TypeRequalif        = r.TypeRequalif
+        TypeRequalif        = r.TypeRequalif,
+        RecIdLink           = r.RecIdLink,   // ← cette ligne manque
+
     }).ToList();
 
     return new PagedRecordsDto
@@ -406,7 +413,39 @@ if (dtTo.HasValue)
             "SeekReversed" => 4, "SeekForward" => 5,
             "Mute" => 8, "Stop" => 9, "Unmute" => 10, _ => 0
         };
+// ══════════════════════════════════════════════
+//  TRACE SCREEN ACTION (vp_action)
+// ══════════════════════════════════════════════
+public async Task SaveScreenTraceAsync(TraceActionDto dto, int userId)
+{
+    // ── Récupérer le ScreenSource depuis VwlistRecordGvs ──────────────────
+    var screenSource = await _db.VwlistRecordGvs
+        .Where(v => v.Id == dto.RecordId)
+        .Select(v => v.ScreenSource)
+        .FirstOrDefaultAsync();
 
+    var action = new VpAction
+    {
+        RecordedId     = dto.RecordId,
+        UserId         = userId,
+        ScreenPosition = FormatSeconds(dto.Position),
+        Duration       = FormatSeconds(dto.Duration),
+        CreateDate     = DateTime.Now,
+        CodeEvent      = MapEventCode(dto.EventType),
+        ScreenFileName = screenSource ?? dto.FileName  // fallback si vue retourne null
+    };
+
+    _db.VpActions.Add(action);
+    await _db.SaveChangesAsync();
+}
+
+private static string FormatSeconds(string? raw)
+{
+    if (string.IsNullOrWhiteSpace(raw)) return "00:00";
+    if (!double.TryParse(raw, out var secs) || double.IsNaN(secs)) return "00:00";
+    var ts = TimeSpan.FromSeconds(secs);
+    return $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}";
+}
         // ══════════════════════════════════════════════
         //  EXPORT CSV
         // ══════════════════════════════════════════════
@@ -518,32 +557,7 @@ if (dtTo.HasValue)
             }).ToList();
         }
 
-        // ══════════════════════════════════════════════
-        //  ZIP
-        // ══════════════════════════════════════════════
-        public async Task<byte[]?> BuildZipAsync(List<int> recordIds)
-        {
-            var sources = new List<(string FileName, string FilePath)>();
-            foreach (var id in recordIds)
-            {
-                var path = await GetRecordSourceAsync(id);
-                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                    sources.Add((Path.GetFileName(path), path));
-            }
-            if (!sources.Any()) return null;
-            using var ms = new MemoryStream();
-            using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
-            {
-                foreach (var (fileName, filePath) in sources)
-                {
-                    var entry = zip.CreateEntry(fileName, CompressionLevel.Fastest);
-                    await using var es = entry.Open();
-                    await using var fs = File.OpenRead(filePath);
-                    await fs.CopyToAsync(es);
-                }
-            }
-            return ms.ToArray();
-        }
+
 
         // ══════════════════════════════════════════════
         //  SUPPRESSION

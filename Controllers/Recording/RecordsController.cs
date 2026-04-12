@@ -149,7 +149,28 @@ public async Task<IActionResult> DeleteRecord(int id)
             }
             catch (Exception ex) { return StatusCode(500, new { message = ex.Message }); }
         }
+// ══════════════════════════════════════════════
+// POST /api/records/trace-screen
+// Sauvegarde une action screen (Play/Pause/…)
+// Toujours 200 — non bloquant
+// ══════════════════════════════════════════════
+[HttpPost("trace-screen")]
+public async Task<IActionResult> TraceScreen([FromBody] TraceActionDto dto)
+{
+    if (dto == null || dto.RecordId <= 0)
+        return Ok();
 
+    try
+    {
+        await _recordRepo.SaveScreenTraceAsync(dto, CurrentUserId);
+    }
+    catch
+    {
+        // trace non bloquant : erreur ignorée
+    }
+
+    return Ok();
+}
        
     }
 }

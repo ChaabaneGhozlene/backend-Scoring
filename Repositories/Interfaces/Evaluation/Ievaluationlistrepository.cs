@@ -34,5 +34,5 @@ namespace scoring_Backend.Repositories.Interfaces.Evaluation
 
         // ── Vérification validité période ───────────────────
         Task<bool> IsLsPeriodValidAsync(int lsId);
-    }
+Task<AgentReportDto> GetAgentReportByRecordDataIdAsync(int recordDataId);    }
 }

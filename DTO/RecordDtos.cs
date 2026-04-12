@@ -43,6 +43,9 @@ namespace scoring_Backend.DTO
         public bool HasHistoryScreen { get; set; }
         public int?     LsId               { get; set; }   // RecordDatum.LsId
         public int?     TypeRequalif        { get; set; }   // RecordDatum.TypeRequalif
+            public int?     RecIdLink           { get; set; }  // ← AJOUTER
+
+
     }
 
     // ── Résultat paginé retourné par /search ──

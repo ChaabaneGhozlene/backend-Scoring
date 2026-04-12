@@ -17,7 +17,7 @@ namespace scoring_Backend.Repositories.Interfaces.Evaluation
     // ── méthodes manquantes à ajouter ───────────────────
     Task SaveRequalificationAsync(RequalificationDto dto);
     Task<string?> GetRecordSourceAsync(int recordId);
-    Task<byte[]?> BuildZipAsync(List<int> recordIds);
+    Task SaveScreenTraceAsync(TraceActionDto dto, int userId);
 }
 
 }

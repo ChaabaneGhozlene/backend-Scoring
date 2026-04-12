@@ -62,7 +62,12 @@ namespace scoring_Backend.DTO
     {
         public int RecordId { get; set; }
     }
-
+// ── Fichier audio d'un enregistrement ──
+public class RecordFileDto
+{
+    public int     Id       { get; set; }
+    public string? FilePath { get; set; }
+}
     // ── Réponse lors de l'ouverture ──
     public class OpenEvaluationResponseDto
     {
@@ -159,5 +164,10 @@ public class MultiSurveyRowDto
     public bool        IsNA           { get; set; }
     public int         ItemOrder      { get; set; }
     public List<float> Values         { get; set; } = new(); // E1, E2, E3...
+}
+public class RecordScreenDto
+{
+    public int     Id           { get; set; }
+    public string? ScreenSource { get; set; }
 }
 }

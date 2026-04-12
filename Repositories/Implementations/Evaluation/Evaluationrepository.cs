@@ -8,6 +8,7 @@ using scoring_Backend.Models.Scoring;
 using scoring_Backend.Repositories.Interfaces.Evaluation;
 using System.Net.Mail;
 using System.Text;
+using scoring_Backend.Models.Admin;
 
 namespace scoring_Backend.Repositories.Implementations.Evaluation
 {
@@ -17,14 +18,19 @@ namespace scoring_Backend.Repositories.Implementations.Evaluation
         private readonly IConfiguration                _cfg;
         private readonly ILogger<EvaluationRepository> _log;
 
+        private readonly SqrAdminContext   _adminDb;
+
         public EvaluationRepository(
             SqrScoringContext db,
             IConfiguration cfg,
-            ILogger<EvaluationRepository> log)
+            ILogger<EvaluationRepository> log,
+            SqrAdminContext adminDb)
         {
             _db  = db;
             _cfg = cfg;
             _log = log;
+                        _adminDb = adminDb;
+
         }
 
         // ══════════════════════════════════════════════════════
@@ -346,12 +352,18 @@ namespace scoring_Backend.Repositories.Implementations.Evaluation
             resp.EvalDate    = DateTime.Now.ToString("MM/dd/yyyy");
             resp.CallIndex   = record.RecIdLink?.ToString() ?? "";
             resp.GridRows    = gridRows;
+         
             resp.Categories  = await GetCategoriesAsync();
             resp.CallReasons = await GetCallReasonsAsync();
+var auditorUser = await _adminDb.Users
+    .FirstOrDefaultAsync(u => u.Id == userId);
+
+resp.Auditor = auditorUser != null
+    ? $"{auditorUser.FirstName} {auditorUser.LastName}".Trim()
+    : "";
 
             return resp;
         }
-
         // ══════════════════════════════════════════════════════
         // SAVE EVALUATION
         // ══════════════════════════════════════════════════════
@@ -501,16 +513,15 @@ try
     string surveyScoreSql, lsScoreSql;
 
     if (siteId == 4)
-    {
-        surveyScoreSql = $"SELECT [dbo].[Fn_Ls_getSurveyScoreAADC]({dto.SurveyId})";
-lsScoreSql = $"SELECT [dbo].[Fn_Ls_getLsScore]({survey.LsId}, 0)";
-    }
-    else
-    {
-        // ✅ FIX : utiliser [dbo] sans préfixe [SQR_REC]
-        surveyScoreSql = $"SELECT [dbo].[Fn_Ls_getSurveyScore]({dto.SurveyId})";
-        lsScoreSql     = $"SELECT [dbo].[Fn_Ls_getLsScore]({survey.LsId}, 0)";
-    }
+{
+    surveyScoreSql = $"SELECT [dbo].[Fn_Ls_getSurveyScoreAADC]({dto.SurveyId})";
+    lsScoreSql     = $"SELECT [dbo].[Fn_Ls_getLsScoreAADC]({survey.LsId})";
+}
+else
+{
+    surveyScoreSql = $"SELECT [dbo].[Fn_Ls_getSurveyScore]({dto.SurveyId})";
+    lsScoreSql     = $"SELECT [dbo].[Fn_Ls_getLsScore]({survey.LsId}, 0)"; // ✅ ajout , 0
+}
 
     _log.LogInformation("SaveEval → Executing: {Sql}", surveyScoreSql);
 
@@ -636,7 +647,19 @@ catch (Exception ex)
         Message = $"Score : {Math.Round(score, 2)}%"
     };
 }
+public async Task<RecordFileDto?> GetRecordFilePathAsync(int recordId)
+{
+    var record = await _db.RecordData
+        .Where(r => r.Id == recordId)
+        .Select(r => new RecordFileDto
+        {
+            Id       = r.Id,
+            FilePath = r.RecFilename   // ← champ physique du fichier
+        })
+        .FirstOrDefaultAsync();
 
+    return record;
+}
         // ══════════════════════════════════════════════════════
         // RÉFÉRENTIELS
         // ══════════════════════════════════════════════════════
@@ -650,25 +673,31 @@ catch (Exception ex)
                 .Select(c => new CallReasonDto { Id = c.Id, Libelle = c.DesCallReason ?? "" })
                 .ToListAsync();
 
-        public async Task<List<AgentDto>> GetAgentsAsync(
-            int userId, int userRole, int userSite)
+       public async Task<List<AgentDto>> GetAgentsAsync(
+    int userId,
+    string userRole,
+    int userSite
+)
+{
+    IQueryable<TListAgent> query = _db.TListAgents;
+
+    // 🔐 Filtrage par site uniquement si pas SuperAdmin
+    if (userRole != "SuperAdmin" && userSite > 0)
+    {
+        query = query.Where(a => a.CustomerId == userSite);
+    }
+
+    return await query
+        .OrderBy(a => a.Prenom)
+        .ThenBy(a => a.Nom)
+        .Select(a => new AgentDto
         {
-            IQueryable<TListAgent> query = _db.TListAgents;
-
-            if (userSite > 0)
-                query = query.Where(a => a.CustomerId == userSite);
-
-            return await query
-                .OrderBy(a => a.Prenom)
-                .ThenBy(a => a.Nom)
-                .Select(a => new AgentDto
-                {
-                    Oid   = a.Oid ?? "",
-                    Label = ((a.Prenom ?? "") + " " + (a.Nom ?? "")).Trim()
-                })
-                .Distinct()
-                .ToListAsync();
-        }
+            Oid   = a.Oid ?? "",
+            Label = ((a.Prenom ?? "") + " " + (a.Nom ?? "")).Trim()
+        })
+        .Distinct()
+        .ToListAsync();
+}
 
         public async Task<byte[]?> BuildZipAsync(List<int> recordIds)
         {
@@ -701,7 +730,7 @@ catch (Exception ex)
         }
 
         public async Task<List<CampaignQualityDto>> GetCampaignQualitiesAsync(
-            string userId, int userSite, int userRole)
+            string userId, int userSite, string userRole)
         {
             return await _db.LsCalledCampaigns
                 .Where(c => c.Status == 1)
@@ -895,5 +924,24 @@ catch (Exception ex)
                 Rows    = rows
             };
         }
+public async Task<RecordScreenDto?> GetRecordScreenPathAsync(int recordId)
+{
+    var record = await _db.VwlistRecordGvs
+        .Where(r => r.Id == recordId)
+        .Select(r => new RecordScreenDto
+        {
+            Id           = r.Id,
+            ScreenSource = r.ScreenSource
+        })
+        .FirstOrDefaultAsync();
+
+    // LOG pour diagnostic
+    Console.WriteLine($"🎬 GetRecordScreenPath → recordId={recordId}");
+    Console.WriteLine($"🎬 ScreenSource={record?.ScreenSource ?? "NULL"}");
+    Console.WriteLine($"🎬 File.Exists={System.IO.File.Exists(record?.ScreenSource ?? "")}");
+
+    return record;
+}
+
     }
 }

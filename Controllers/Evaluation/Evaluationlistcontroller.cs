@@ -286,7 +286,21 @@ public async Task<IActionResult> CheckPeriodValidity(int lsId)
     var isValid = await _repo.IsLsPeriodValidAsync(lsId);
     return Ok(new { isValid });
 }
-
+// ────────────────────────────────────────────────────
+// GET /api/evaluation-list/agent-report?recordDataId=X
+// Rapport agent via recordDataId (sans lsId)
+// ────────────────────────────────────────────────────
+[HttpGet("agent-report")]
+public async Task<IActionResult> GetAgentReportByRecordDataId([FromQuery] int recordDataId)
+{
+    try
+    {
+        var report = await _repo.GetAgentReportByRecordDataIdAsync(recordDataId);
+        return Ok(report);
+    }
+    catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    catch (Exception ex) { return StatusCode(500, new { message = ex.Message }); }
+}
 
 
 

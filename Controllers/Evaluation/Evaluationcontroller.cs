@@ -14,16 +14,25 @@ namespace scoring_Backend.Controllers.Evaluation
     [Route("api/[controller]")]
     [Authorize]
     public class EvaluationController : ControllerBase
-    {
-        private readonly IEvaluationRepository _repo;
+    {private readonly IEvaluationRepository            _repo;
+        private readonly ILogger<EvaluationController>    _logger;
+        private readonly IConfiguration                   _configuration;
 
-        public EvaluationController(IEvaluationRepository repo) => _repo = repo;
-
+        // ── Constructeur corrigé avec toutes les dépendances ──
+        public EvaluationController(
+            IEvaluationRepository         repo,
+            ILogger<EvaluationController> logger,
+            IConfiguration                configuration)
+        {
+            _repo          = repo;
+            _logger        = logger;
+            _configuration = configuration;
+        }
         // ── Claims ──────────────────────────────────────────────
-        private int    CurrentUserId    => int.Parse(User.FindFirstValue("UserId")   ?? "0");
+        private int    CurrentUserId    => int.Parse(User.FindFirstValue("userId")   ?? "0");
         private string CurrentUserLogin => User.FindFirstValue(ClaimTypes.Name)      ?? string.Empty;
-        private int    CurrentUserRole  => int.Parse(User.FindFirstValue("UserRole") ?? "0");
-        private int    CurrentUserSite  => int.Parse(User.FindFirstValue("UserSite") ?? "0");
+private string CurrentUserRole => User.FindFirstValue("userRole") ?? "";
+        private int    CurrentUserSite  => int.Parse(User.FindFirstValue("userSite") ?? "0");
 
         // ══════════════════════════════════════════════════════
         // POST /api/evaluation/open
@@ -159,19 +168,50 @@ public async Task<IActionResult> Open([FromBody] OpenEvaluationRequestDto dto)
         // ══════════════════════════════════════════════════════
         /// <summary>Retourne la liste des agents visibles selon le rôle.</summary>
         [HttpGet("agents")]
-        public async Task<IActionResult> GetAgents()
-        {
-            try
-            {
-                var list = await _repo.GetAgentsAsync(
-                    CurrentUserId, CurrentUserRole, CurrentUserSite);
-                return Ok(list);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = ex.Message });
-            }
-        }
+        
+public async Task<IActionResult> GetAgents()
+{
+    try
+    {
+        var list = await _repo.GetAgentsAsync(
+            CurrentUserId,   // int
+            CurrentUserRole, // string ("SuperAdmin", "Admin", ...)
+            CurrentUserSite  // int
+        );
+        return Ok(list);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, new { message = ex.Message });
+    }
+}
+
+[HttpGet("records/{recordId:int}/stream")]
+public async Task<IActionResult> StreamAudio(int recordId)
+{
+    Console.WriteLine($"🎵 StreamAudio appelé pour recordId={recordId}");
+
+    var record = await _repo.GetRecordFilePathAsync(recordId);
+
+    Console.WriteLine($"🎵 FilePath={record?.FilePath ?? "NULL"}");
+
+    if (record == null || string.IsNullOrEmpty(record.FilePath))
+        return NotFound(new { message = "Enregistrement introuvable." });
+
+    Console.WriteLine($"🎵 File.Exists={System.IO.File.Exists(record.FilePath)}");
+
+    if (!System.IO.File.Exists(record.FilePath))
+        return NotFound(new { message = "Fichier audio introuvable sur le serveur." });
+
+    var stream   = System.IO.File.OpenRead(record.FilePath);
+    var mimeType = record.FilePath.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
+                   ? "audio/mpeg"
+                   : "audio/wav";
+
+    Console.WriteLine($"🎵 Streaming fichier mimeType={mimeType}");
+
+    return File(stream, mimeType, enableRangeProcessing: true);
+}
 
         // ══════════════════════════════════════════════════════
         // GET /api/evaluation/campaign-qualities
@@ -214,19 +254,60 @@ public async Task<IActionResult> Open([FromBody] OpenEvaluationRequestDto dto)
                 return StatusCode(500, new { message = ex.Message });
             }
         }
-        // GET /api/evaluation/surveys/{recordId}
-[HttpGet("surveys/{recordId:int}")]
-public async Task<IActionResult> GetAllSurveys(int recordId)
+[HttpGet("records/{recordId:int}/stream-screen")]
+public async Task<IActionResult> StreamScreen(int recordId)
 {
-    try
+    var record = await _repo.GetRecordScreenPathAsync(recordId);
+
+    if (record == null || string.IsNullOrEmpty(record.ScreenSource))
+        return NotFound(new { message = "ScreenSource introuvable." });
+
+    if (!System.IO.File.Exists(record.ScreenSource))
+        return NotFound(new { message = $"Fichier introuvable: {record.ScreenSource}" });
+
+    var ext = Path.GetExtension(record.ScreenSource).ToLowerInvariant();
+
+    // MP4/WEBM → stream direct
+    if (ext == ".mp4" || ext == ".webm")
     {
-        var result = await _repo.GetAllSurveysForRecordAsync(recordId);
-        return Ok(result);
+        var mime = ext == ".mp4" ? "video/mp4" : "video/webm";
+        return File(System.IO.File.OpenRead(record.ScreenSource), mime, enableRangeProcessing: true);
     }
-    catch (Exception ex)
+
+    // FLV → conversion ffmpeg → MP4 streamé directement
+    var ffmpegPath = _configuration["FfmpegPath"] ?? "ffmpeg";
+
+    var psi = new System.Diagnostics.ProcessStartInfo
     {
-        return StatusCode(500, new { message = ex.Message });
-    }
+        FileName  = ffmpegPath,
+        Arguments = $"-i \"{record.ScreenSource}\" " +
+            $"-c:v libx264 -preset ultrafast -crf 28 " +
+            $"-c:a aac -b:a 128k -ar 44100 -ac 2 " +  // ✅ forcer stéréo 44100Hz
+            $"-movflags frag_keyframe+empty_moov+faststart " +
+            $"-f mp4 pipe:1",
+        RedirectStandardOutput = true,
+        RedirectStandardError  = true,
+        UseShellExecute        = false,
+        CreateNoWindow         = true,
+    };
+
+    var process = System.Diagnostics.Process.Start(psi);
+    if (process == null)
+        return StatusCode(500, new { message = "Impossible de démarrer ffmpeg." });
+
+    // ✅ Lire stderr en arrière-plan pour éviter le deadlock
+    _ = process.StandardError.ReadToEndAsync();
+
+    Response.OnCompleted(() =>
+    {
+        try { if (!process.HasExited) process.Kill(); } catch { }
+        process.Dispose();
+        return Task.CompletedTask;
+    });
+
+    // ✅ Stream direct sans attendre la fin de la conversion
+    return File(process.StandardOutput.BaseStream, "video/mp4");
 }
+
     }
 }

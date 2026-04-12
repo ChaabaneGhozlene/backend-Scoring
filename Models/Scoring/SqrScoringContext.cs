@@ -14,7 +14,8 @@ public partial class SqrScoringContext : DbContext
         : base(options)
     {
     }
-
+// Dans votre SqrScoringContext existant, ajouter :
+public DbSet<UserDashboardConfig> UserDashboardConfigs { get; set; }
     public virtual DbSet<ApAction> ApActions { get; set; }
 
     public virtual DbSet<ApEvent> ApEvents { get; set; }

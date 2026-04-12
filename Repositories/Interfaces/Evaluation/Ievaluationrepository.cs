@@ -29,11 +29,11 @@ namespace scoring_Backend.Repositories.Interfaces.Evaluation
         Task<List<CallReasonDto>> GetCallReasonsAsync();
 
         // ── Agents visibles par l'utilisateur ─────────────────
-        Task<List<AgentDto>> GetAgentsAsync(int userId, int userRole, int userSite);
+        Task<List<AgentDto>> GetAgentsAsync(int userId, string userRole, int userSite);
    
         // ── Campagnes qualité visibles par l'utilisateur ──────
         Task<List<CampaignQualityDto>> GetCampaignQualitiesAsync(
-            string userId, int userSite, int userRole);
+            string userId, int userSite, string userRole);
 
         // ── Statuts Hermess pour requalification ──────────────
         Task<List<CallStatusItemDto>> GetCallStatusItemsAsync(
@@ -43,6 +43,7 @@ namespace scoring_Backend.Repositories.Interfaces.Evaluation
         Task RequalifyRecordAsync(RequalificationDto dto, int userId);
             Task<byte[]?> BuildZipAsync(List<int> recordIds);
 Task<MultiSurveyResponseDto> GetAllSurveysForRecordAsync(int recordId);
-
+ Task<RecordFileDto?> GetRecordFilePathAsync(int recordId);
+Task<RecordScreenDto?> GetRecordScreenPathAsync(int recordId);
     }
 }
