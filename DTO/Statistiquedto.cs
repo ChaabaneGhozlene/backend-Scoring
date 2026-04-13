@@ -6,6 +6,8 @@ namespace scoring_Backend.DTO.Statistique
         public DateTime DateTo { get; set; }
             public bool AllSupervisors { get; set; } = false;
                 public int?     SupervisorId  { get; set; }  // ← ajouter
+                    public string?  SortDirection  { get; set; }
+
 
 
     }
@@ -111,6 +113,8 @@ public class SectionRawRow
         public bool AllSupervisors { get; set; } = true;
         public string SortDirection { get; set; } = "Descending";
             public int?         SupervisorId   { get; set; }  // ← ajouter
+                public string?       ChartImage     { get; set; }   // ← NOUVEAU : base64 PNG du graphique
+
 
     }
 }

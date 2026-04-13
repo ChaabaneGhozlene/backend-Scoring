@@ -1,6 +1,8 @@
+
 // ============================================================
-// Repositories/Implementations/Evaluation/EvaluationRepository.cs
-// ============================================================
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 using System.IO.Compression;
 using Microsoft.EntityFrameworkCore;
 using scoring_Backend.DTO;
@@ -784,76 +786,458 @@ public async Task<RecordFileDto?> GetRecordFilePathAsync(int recordId)
         // ══════════════════════════════════════════════════════
         // ENVOI EMAIL
         // ══════════════════════════════════════════════════════
-        private async Task TrySendEmailAsync(
-            LsSurvey survey,
-            List<LsSurveyItem> items,
-            List<LsTemplateItem> templateItems,
-            RecordDatum record,
-            string? cc)
+private async Task TrySendEmailAsync(
+    LsSurvey survey,
+    List<LsSurveyItem> items,
+    List<LsTemplateItem> templateItems,
+    RecordDatum record,
+    string? cc)
+{
+    try
+    {
+        // ── 1. Email agent ────────────────────────────────────
+        var agentEmail = await _db.TListAgentEmails
+            .Where(e => e.Oidagent == record.AgentOid)
+            .Select(e => e.Email)
+            .FirstOrDefaultAsync();
+
+        if (string.IsNullOrWhiteSpace(agentEmail))
         {
-            try
-            {
-                var agentEmail = await _db.TListAgentEmails
-                    .Where(e => e.Oidagent == record.AgentOid)
-                    .Select(e => e.Email)
-                    .FirstOrDefaultAsync();
-
-                if (string.IsNullOrWhiteSpace(agentEmail)) return;
-
-                var templateDict = templateItems.ToDictionary(t => t.Id);
-
-                var sb = new StringBuilder();
-                sb.AppendLine("<div style='font-family:Verdana;font-size:10px'>");
-                sb.AppendLine($"<b>Record date :</b> {record.RecordDate:dd/MM/yyyy}<br>");
-                sb.AppendLine($"<b>Evaluation date :</b> {DateTime.Now:dd/MM/yyyy}<br>");
-
-                if (!string.IsNullOrEmpty(survey.Memo))
-                    sb.AppendLine($"<b>Comment :</b> {survey.Memo}<br>");
-
-                if (!string.IsNullOrEmpty(survey.MemoActionTaken))
-                    sb.AppendLine($"<b>Action taken with agent :</b> {survey.MemoActionTaken}<br>");
-
-                sb.AppendLine($"<b>Sheet Score = {survey.Score}%</b><br>");
-                sb.AppendLine("<table border='2' style='font-family:Verdana;font-size:10px'>");
-                sb.AppendLine("<tr><td><b>Item</b></td><td><b>Memo</b></td><td><b>Score</b></td></tr>");
-
-                foreach (var item in items)
-                {
-                    var description = templateDict.TryGetValue(item.ItemId, out var ti)
-                        ? ti.Description ?? ""
-                        : item.ItemId.ToString();
-
-                    sb.AppendLine(
-                        $"<tr><td>{description}</td><td>{item.Memo}</td><td>{item.Value}</td></tr>");
-                }
-
-                sb.AppendLine("</table></div>");
-
-                var smtp     = _cfg["Email:SmtpHost"] ?? "localhost";
-                var fromAddr = _cfg["Email:From"]     ?? "noreply@company.com";
-                var subject  = _cfg["Email:Subject"]  ?? "Résultat évaluation";
-
-                using var mail = new MailMessage();
-                mail.From    = new MailAddress(fromAddr);
-                mail.To.Add(agentEmail.Trim());
-
-                if (!string.IsNullOrWhiteSpace(cc))
-                    mail.CC.Add(cc.Trim());
-
-                mail.Subject    = subject;
-                mail.Body       = sb.ToString();
-                mail.IsBodyHtml = true;
-
-                using var client = new SmtpClient(smtp);
-                await client.SendMailAsync(mail);
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Envoi email évaluation échoué");
-            }
+            _log.LogWarning("Email → ⚠️ Aucun email trouvé pour l'agent {AgentOid}", record.AgentOid);
+            return;
         }
 
-        // ══════════════════════════════════════════════════════
+        // ── 2. Infos agent ────────────────────────────────────
+        var agentName = $"{record.PrenomAgent} {record.NomAgent}".Trim();
+        var safeName  = string.Join("_", agentName.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+        // ── 3. Config SMTP ────────────────────────────────────
+        var smtpHost  = _cfg["Email:SmtpHost"]  ?? "smtp.gmail.com";
+        var smtpPort  = int.Parse(_cfg["Email:Port"] ?? "587");
+        var username  = _cfg["Email:Username"]  ?? "";
+        var password  = _cfg["Email:Password"]  ?? "";
+        var fromAddr  = _cfg["Email:From"]      ?? username;
+        var enableSsl = bool.Parse(_cfg["Email:EnableSsl"] ?? "true");
+
+        // ── 4. Dictionnaire templates ─────────────────────────
+        var templateDict = templateItems.ToDictionary(t => t.Id);
+
+        // ── 5. Générer le PDF ─────────────────────────────────
+        var pdfBytes = GeneratePdf(survey, items, templateDict, record, agentName);
+        var pdfName  = $"evaluation_{safeName}_{DateTime.Now:yyyyMMdd}.pdf";
+
+        // ── 6. Score couleur pour l'email ─────────────────────
+        var scoreColor  = survey.Score >= 80 ? "#16a34a" : survey.Score >= 60 ? "#d97706" : "#dc2626";
+        var scoreBg     = survey.Score >= 80 ? "#f0fdf4" : survey.Score >= 60 ? "#fffbeb" : "#fef2f2";
+        var scoreBorder = survey.Score >= 80 ? "#86efac" : survey.Score >= 60 ? "#fcd34d" : "#fca5a5";
+        var scoreLabel  = survey.Score >= 80 ? "✅ Excellent" : survey.Score >= 60 ? "⚠️ À améliorer" : "❌ Insuffisant";
+
+        // ── 7. Corps email ────────────────────────────────────
+        var html = $@"
+<!DOCTYPE html>
+<html lang='fr'>
+<head>
+  <meta charset='UTF-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+</head>
+<body style='margin:0;padding:0;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif;'>
+
+  <!-- Wrapper -->
+  <table width='100%' cellpadding='0' cellspacing='0' style='background:#f1f5f9;padding:32px 0;'>
+    <tr><td align='center'>
+      <table width='560' cellpadding='0' cellspacing='0' style='max-width:560px;width:100%;'>
+
+        <!-- HEADER -->
+        <tr>
+          <td style='background:#dc2626;border-radius:12px 12px 0 0;padding:28px 32px;'>
+            <div style='font-size:11px;color:#fca5a5;font-weight:600;
+                        text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;'>
+              Système de scoring qualité
+            </div>
+            <div style='font-size:22px;font-weight:700;color:#ffffff;margin-bottom:4px;'>
+              Rapport d'évaluation
+            </div>
+            <div style='font-size:13px;color:#fecaca;'>
+              {DateTime.Now:dddd dd MMMM yyyy}
+            </div>
+          </td>
+        </tr>
+
+        <!-- BODY -->
+        <tr>
+          <td style='background:#ffffff;padding:32px;'>
+
+            <!-- Salutation -->
+            <div style='font-size:17px;font-weight:700;color:#111827;margin-bottom:8px;'>
+              Bonjour, <span style='color:#dc2626;'>{agentName}</span> 👋
+            </div>
+            <div style='font-size:13px;color:#6b7280;line-height:1.8;margin-bottom:28px;'>
+              Votre évaluation qualité du
+              <strong style='color:#374151;'>{DateTime.Now:dd/MM/yyyy}</strong>
+              est disponible. Veuillez consulter le rapport en pièce jointe.
+            </div>
+
+            <!-- Score card -->
+            <div style='background:{scoreBg};border:1px solid {scoreBorder};
+                        border-radius:10px;padding:20px 24px;margin-bottom:24px;
+                        border-left:4px solid {scoreColor};'>
+              <div style='font-size:11px;color:#9ca3af;font-weight:600;
+                          text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;'>
+                Score global
+              </div>
+              <div style='display:flex;align-items:center;gap:12px;'>
+                <span style='font-size:36px;font-weight:800;color:{scoreColor};'>
+                  {survey.Score:F1}%
+                </span>
+                <span style='font-size:13px;font-weight:600;color:{scoreColor};
+                             background:{scoreBg};padding:4px 12px;
+                             border-radius:20px;border:1px solid {scoreBorder};'>
+                  {scoreLabel}
+                </span>
+              </div>
+            </div>
+
+            <!-- Infos -->
+            <table width='100%' cellpadding='0' cellspacing='0'
+                   style='background:#f9fafb;border:1px solid #e5e7eb;
+                          border-radius:8px;margin-bottom:24px;'>
+              <tr>
+                <td style='padding:14px 20px;border-right:1px solid #e5e7eb;'>
+                  <div style='font-size:10px;color:#9ca3af;font-weight:600;
+                              text-transform:uppercase;margin-bottom:3px;'>
+                    Date d'enregistrement
+                  </div>
+                  <div style='font-size:13px;font-weight:600;color:#374151;'>
+                    {(record.RecordDate.HasValue ? record.RecordDate.Value.ToString("dd/MM/yyyy") : "—")}
+                  </div>
+                </td>
+                <td style='padding:14px 20px;border-right:1px solid #e5e7eb;'>
+                  <div style='font-size:10px;color:#9ca3af;font-weight:600;
+                              text-transform:uppercase;margin-bottom:3px;'>
+                    Date d'évaluation
+                  </div>
+                  <div style='font-size:13px;font-weight:600;color:#374151;'>
+                    {DateTime.Now:dd/MM/yyyy}
+                  </div>
+                </td>
+                <td style='padding:14px 20px;'>
+                  <div style='font-size:10px;color:#9ca3af;font-weight:600;
+                              text-transform:uppercase;margin-bottom:3px;'>
+                    Indice
+                  </div>
+                  <div style='font-size:13px;font-weight:600;color:#374151;'>
+                    {record.RecIdLink?.ToString() ?? "—"}
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Pièce jointe info -->
+            <div style='background:#fff;border:1px dashed #d1d5db;border-radius:8px;
+                        padding:14px 18px;margin-bottom:28px;
+                        display:flex;align-items:center;gap:12px;'>
+              
+            </div>
+
+            <!-- CTA -->
+            <div style='text-align:center;margin-bottom:28px;'>
+              <div style='display:inline-block;background:#dc2626;color:#fff;
+                          padding:12px 32px;border-radius:8px;font-size:13px;
+                          font-weight:700;letter-spacing:.3px;'>
+                📎 Consultez votre rapport en pièce jointe
+              </div>
+            </div>
+
+          </td>
+        </tr>
+
+        <!-- FOOTER -->
+        <tr>
+          <td style='background:#f9fafb;border-top:1px solid #e5e7eb;
+                     border-radius:0 0 12px 12px;padding:18px 32px;
+                     text-align:center;'>
+            <div style='font-size:11px;color:#9ca3af;line-height:1.7;'>
+              Ce message est généré automatiquement par le système de scoring qualité.<br>
+              <strong style='color:#6b7280;'>Merci de ne pas répondre à cet email.</strong>
+            </div>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+
+</body>
+</html>";
+
+        // ── 8. Construction du mail ───────────────────────────
+        using var mail = new MailMessage();
+        mail.From       = new MailAddress(fromAddr);
+        mail.To.Add(agentEmail.Trim());
+        mail.Subject    = $"{agentName} — Résultat de votre évaluation qualité du {DateTime.Now:dd/MM/yyyy}";
+        mail.Body       = html;
+        mail.IsBodyHtml = true;
+
+        if (!string.IsNullOrWhiteSpace(cc))
+            mail.CC.Add(cc.Trim());
+
+        // ── 9. Attacher le PDF ────────────────────────────────
+        var pdfStream  = new MemoryStream(pdfBytes);
+        var attachment = new Attachment(pdfStream, pdfName, "application/pdf");
+        mail.Attachments.Add(attachment);
+
+        // ── 10. Envoi SMTP ────────────────────────────────────
+        using var client = new SmtpClient(smtpHost)
+        {
+            Port                  = smtpPort,
+            Credentials           = new System.Net.NetworkCredential(username, password),
+            EnableSsl             = enableSsl,
+            UseDefaultCredentials = false,
+            DeliveryMethod        = SmtpDeliveryMethod.Network,
+        };
+
+        await client.SendMailAsync(mail);
+
+        _log.LogInformation("Email → ✅ Envoyé à {To} avec PDF joint (CC: {Cc})",
+            agentEmail, cc ?? "aucun");
+    }
+    catch (Exception ex)
+    {
+        _log.LogError(ex,
+            "Email → ❌ Échec envoi pour agentOid={AgentOid} surveyId={SurveyId}",
+            record.AgentOid, survey.Id);
+    }
+}
+
+// ── Génération PDF ────────────────────────────────────────────────────────
+private byte[] GeneratePdf(
+    LsSurvey survey,
+    List<LsSurveyItem> items,
+    Dictionary<int, LsTemplateItem> templateDict,
+    RecordDatum record,
+    string agentName)
+{
+    QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
+    var initiales = string.Concat(
+        agentName.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                 .Take(2)
+                 .Select(w => w[0].ToString().ToUpper()));
+
+    var scoreColor = survey.Score >= 80 ? Colors.Green.Medium
+                   : survey.Score >= 60 ? Colors.Orange.Medium
+                   : Colors.Red.Medium;
+
+    var scoreLabel = survey.Score >= 80 ? "Excellent"
+                   : survey.Score >= 60 ? "À améliorer"
+                   : "Insuffisant";
+
+    return Document.Create(container =>
+    {
+        container.Page(page =>
+        {
+            page.Size(PageSizes.A4);
+            page.Margin(2, Unit.Centimetre);
+            page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
+
+            // ── HEADER ────────────────────────────────────────
+            page.Header().Background("#dc2626").Padding(20).Row(row =>
+            {
+                row.RelativeItem().Column(col =>
+                {
+                    col.Item().Text("RAPPORT D'ÉVALUATION QUALITÉ")
+                       .FontSize(8).FontColor("#fca5a5").Bold()
+                       .LetterSpacing(0.08f);
+                    col.Item().PaddingTop(4).Text(agentName)
+                       .FontSize(18).FontColor("#ffffff").Bold();
+                    col.Item().PaddingTop(2).Text($"Évaluation du {DateTime.Now:dd/MM/yyyy}")
+                       .FontSize(9).FontColor("#fecaca");
+                });
+
+                row.ConstantItem(60).AlignMiddle().AlignRight()
+                   .Width(52).Height(52)
+                   .Background("#991b1b")
+                   .AlignCenter().AlignMiddle()
+                   .Text(initiales)
+                   .FontSize(20).FontColor("#ffffff").Bold();
+            });
+
+            // ── CONTENU ───────────────────────────────────────
+            page.Content().PaddingTop(20).Column(col =>
+            {
+                // ── Score + Infos ─────────────────────────────
+                col.Item()
+                   .Border(1).BorderColor("#e5e7eb")
+                   .Background("#f9fafb")
+                   .Padding(16).Row(row =>
+                   {
+                       // Score
+                       row.RelativeItem(2).Column(c =>
+                       {
+                           c.Item().Text("SCORE GLOBAL")
+                            .FontSize(8).FontColor("#9ca3af").Bold().LetterSpacing(0.05f);
+                           c.Item().PaddingTop(4).Text($"{survey.Score:F1}%")
+                            .FontSize(32).Bold().FontColor(scoreColor);
+                           c.Item().Text(scoreLabel)
+                            .FontSize(9).Bold().FontColor(scoreColor);
+                       });
+
+                       // Séparateur
+                       row.ConstantItem(1).Background("#e5e7eb");
+
+                       // Dates + Indice
+                       row.RelativeItem(3).PaddingLeft(16).Column(c =>
+                       {
+                           c.Item().Row(r =>
+                           {
+                               r.RelativeItem().Column(inner =>
+                               {
+                                   inner.Item().Text("DATE ENREGISTREMENT")
+                                        .FontSize(8).FontColor("#9ca3af").Bold();
+                                   inner.Item().PaddingTop(2)
+                                        .Text(record.RecordDate.HasValue
+                                            ? record.RecordDate.Value.ToString("dd/MM/yyyy") : "—")
+                                        .FontSize(11).Bold();
+                               });
+                               r.RelativeItem().Column(inner =>
+                               {
+                                   inner.Item().Text("DATE ÉVALUATION")
+                                        .FontSize(8).FontColor("#9ca3af").Bold();
+                                   inner.Item().PaddingTop(2)
+                                        .Text(DateTime.Now.ToString("dd/MM/yyyy"))
+                                        .FontSize(11).Bold();
+                               });
+                               r.RelativeItem().Column(inner =>
+                               {
+                                   inner.Item().Text("INDICE")
+                                        .FontSize(8).FontColor("#9ca3af").Bold();
+                                   inner.Item().PaddingTop(2)
+                                        .Text(record.RecIdLink?.ToString() ?? "—")
+                                        .FontSize(11).Bold();
+                               });
+                           });
+                       });
+                   });
+
+                // ── Commentaire ───────────────────────────────
+                if (!string.IsNullOrWhiteSpace(survey.Memo))
+                {
+                    col.Item().PaddingTop(14)
+                       .Background("#fef2f2")
+                       .BorderLeft(4).BorderColor("#dc2626")
+                       .Padding(12).Column(c =>
+                       {
+                           c.Item().Text("💬 COMMENTAIRE")
+                            .FontSize(8).Bold().FontColor("#dc2626").LetterSpacing(0.05f);
+                           c.Item().PaddingTop(4).Text(survey.Memo)
+                            .FontSize(10).FontColor("#374151").LineHeight(1.5f);
+                       });
+                }
+
+                // ── Action prise ──────────────────────────────
+                if (!string.IsNullOrWhiteSpace(survey.MemoActionTaken))
+                {
+                    col.Item().PaddingTop(10)
+                       .Background("#f0fdf4")
+                       .BorderLeft(4).BorderColor("#16a34a")
+                       .Padding(12).Column(c =>
+                       {
+                           c.Item().Text("✅ ACTION PRISE AVEC L'AGENT")
+                            .FontSize(8).Bold().FontColor("#16a34a").LetterSpacing(0.05f);
+                           c.Item().PaddingTop(4).Text(survey.MemoActionTaken)
+                            .FontSize(10).FontColor("#374151").LineHeight(1.5f);
+                       });
+                }
+
+                // ── Titre tableau ─────────────────────────────
+                col.Item().PaddingTop(18).PaddingBottom(8).Row(r =>
+                {
+                    r.RelativeItem().Text("Détail des critères évalués")
+                     .FontSize(12).Bold().FontColor("#111827");
+                    r.ConstantItem(80).AlignRight()
+                     .Text($"{items.Count} critère(s)")
+                     .FontSize(9).FontColor("#9ca3af");
+                });
+
+                // ── Tableau ───────────────────────────────────
+                col.Item().Table(table =>
+                {
+                    table.ColumnsDefinition(columns =>
+                    {
+                        columns.RelativeColumn(4);
+                        columns.RelativeColumn(4);
+                        columns.RelativeColumn(2);
+                    });
+
+                    // En-tête
+                    table.Header(h =>
+                    {
+                        foreach (var label in new[] { "CRITÈRE", "COMMENTAIRE", "NOTE" })
+                        {
+                            var cell = h.Cell().Background("#dc2626").Padding(9);
+                            if (label == "NOTE")
+                                cell.AlignCenter().Text(label).FontSize(9).Bold().FontColor("#ffffff");
+                            else
+                                cell.Text(label).FontSize(9).Bold().FontColor("#ffffff");
+                        }
+                    });
+
+                    var rowIndex = 0;
+                    foreach (var item in items)
+                    {
+                        if (!templateDict.TryGetValue(item.ItemId, out var ti)) continue;
+
+                        var bg          = rowIndex % 2 == 0 ? "#ffffff" : "#f9fafb";
+                        var description = ti.Description ?? item.ItemId.ToString();
+                        var memo        = string.IsNullOrWhiteSpace(item.Memo) ? "—" : item.Memo;
+
+                        var noteColor = item.Value >= 80 ? Colors.Green.Darken2
+                                      : item.Value >= 60 ? Colors.Orange.Darken2
+                                      : Colors.Red.Darken2;
+
+                        table.Cell().Background(bg)
+                             .BorderBottom(1).BorderColor("#f3f4f6")
+                             .Padding(9).Text(description)
+                             .FontSize(9).FontColor("#374151");
+
+                        table.Cell().Background(bg)
+                             .BorderBottom(1).BorderColor("#f3f4f6")
+                             .Padding(9).Text(memo)
+                             .FontSize(9).FontColor("#6b7280");
+
+                        table.Cell().Background(bg)
+                             .BorderBottom(1).BorderColor("#f3f4f6")
+                             .Padding(9).AlignCenter()
+                             .Text($"{item.Value}")
+                             .FontSize(10).Bold().FontColor(noteColor);
+
+                        rowIndex++;
+                    }
+                });
+            });
+
+            // ── FOOTER ────────────────────────────────────────
+            page.Footer().PaddingTop(8)
+                .BorderTop(1).BorderColor("#e5e7eb")
+                .Row(row =>
+                {
+                    row.RelativeItem().AlignLeft()
+                       .Text("Rapport généré automatiquement — Système de scoring qualité")
+                       .FontSize(8).FontColor("#9ca3af");
+
+                    row.ConstantItem(80).AlignRight().Text(text =>
+                    {
+                        text.Span("Page ").FontSize(8).FontColor("#9ca3af");
+                        text.CurrentPageNumber().FontSize(8).FontColor("#9ca3af");
+                        text.Span(" / ").FontSize(8).FontColor("#9ca3af");
+                        text.TotalPages().FontSize(8).FontColor("#9ca3af");
+                    });
+                });
+        });
+    }).GeneratePdf();
+
+    
+}    // ══════════════════════════════════════════════════════
         // GET ALL SURVEYS FOR RECORD
         // ══════════════════════════════════════════════════════
         public async Task<MultiSurveyResponseDto> GetAllSurveysForRecordAsync(int recordId)

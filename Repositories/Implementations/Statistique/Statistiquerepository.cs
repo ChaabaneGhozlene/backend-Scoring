@@ -25,26 +25,36 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
             var dateTo   = filter.DateTo.Date.AddDays(1).AddSeconds(-1);
 
             var sql = @"
-                SELECT
-                    grp.Id          AS GroupId,
-                    grp.[Order]     AS SectionOrder,
-                    grp.Description AS Section,
-                    l.Agent         AS Agent,
-                    ISNULL(l.AgentId, 0) AS AgentId,
-                    cc.Description  AS Campaign,
-                    ss.ScoreGroup   AS ScoreGroup
-                FROM LsScoreSection ss
-                INNER JOIN LsSurvey sv       ON ss.IdLsSurvey            = sv.Id
-                INNER JOIN Ls l              ON sv.LsId                  = l.Id
-                INNER JOIN LsCalledCampaign cc ON l.CalledCampaignId     = cc.Id
-                INNER JOIN LsTemplateItemGroup grp ON ss.IdLsTemplateItemGroup = grp.Id
-                WHERE sv.CreateDate >= {0}
-                  AND sv.CreateDate <= {1}
-                  AND sv.IsSaved    = {2}";
+        SELECT grp.Id AS GroupId, grp.[Order] AS SectionOrder, ...
+        FROM LsScoreSection ss
+        INNER JOIN LsSurvey sv ON ss.IdLsSurvey = sv.Id
+        INNER JOIN Ls l ON sv.LsId = l.Id
+        ...
+        WHERE sv.CreateDate >= {0}
+          AND sv.CreateDate <= {1}
+          AND sv.IsSaved = {2}";
 
-            var raw = await _db.Database
-                .SqlQueryRaw<SectionRawRow>(sql, dateFrom, dateTo, 1)
-                .ToListAsync();
+    var raw = await _db.Database
+        .SqlQueryRaw<SectionRawRow>(sql, dateFrom, dateTo, 1)
+        .ToListAsync();
+
+    // ← AJOUTER ICI le filtre superviseur
+    if (userRole == 3 && !filter.AllSupervisors && filter.SupervisorId.HasValue)
+    {
+        var supervisorAgentIds = await _adminDb.UsersAgents
+            .Where(ua => ua.UserId == filter.SupervisorId.Value)
+            .Select(ua => ua.AgentId)
+            .ToListAsync();
+        raw = raw.Where(r => supervisorAgentIds.Contains(r.AgentId)).ToList();
+    }
+    else if (userRole == 3 && !filter.AllSupervisors)
+    {
+        var supervisorAgentIds = await _adminDb.UsersAgents
+            .Where(ua => ua.UserId == userId)
+            .Select(ua => ua.AgentId)
+            .ToListAsync();
+        raw = raw.Where(r => supervisorAgentIds.Contains(r.AgentId)).ToList();
+    }
 
             if (!raw.Any())
                 return Enumerable.Empty<SectionStatsDto>();
@@ -97,51 +107,61 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
 
         // ─── Agent Scores ──────────────────────────────────────────────────────
         public async Task<IEnumerable<AgentScoreDto>> GetAgentScoresAsync(
-            StatFilterDto filter, int userId, int userRole, int siteId, string sortDirection)
+    StatFilterDto filter, int userId, int userRole, int siteId, string sortDirection)
+{
+    var dateFrom = filter.DateFrom.Date;
+    var dateTo   = filter.DateTo.Date.AddDays(1).AddSeconds(-1);
+
+    // ✅ Log pour déboguer
+    Console.WriteLine($"🔍 GetAgentScores — userRole={userRole}, userId={userId}, " +
+                      $"allSupervisors={filter.AllSupervisors}, supervisorId={filter.SupervisorId}");
+
+    var allowedCampagnes = await GetAllowedCampagnes(userId, userRole, siteId);
+
+    var query =
+        from sv in _db.LsSurveys
+        join l  in _db.Ls                on sv.LsId            equals l.Id
+        join cc in _db.LsCalledCampaigns on l.CalledCampaignId equals cc.Id
+        where sv.CreateDate >= dateFrom
+           && sv.CreateDate <= dateTo
+           && sv.IsSaved == 1
+        select new { sv, l, cc };
+
+    query = userRole switch
+    {
+        2 => query.Where(x =>
+                allowedCampagnes.Contains(x.cc.CampagneDid!) &&
+                x.cc.Site == siteId &&
+                (siteId == 4 ? x.l.AgentId > 6000 : x.l.AgentId < 6000)),
+
+        3 => filter.AllSupervisors
+            ? query.Where(x =>
+                siteId == 4 ? x.l.AgentId > 6000 : x.l.AgentId < 6000)
+            : query.Where(x =>
+                // ✅ SupervisorId prioritaire, fallback userId si null ou 0
+                x.l.Auditor == (filter.SupervisorId.HasValue && filter.SupervisorId.Value > 0
+                    ? filter.SupervisorId.Value
+                    : userId) &&
+                (siteId == 4 ? x.l.AgentId > 6000 : x.l.AgentId < 6000)),
+
+            _ => filter.AllSupervisors || !filter.SupervisorId.HasValue || filter.SupervisorId.Value == 0
+        ? query
+        : query.Where(x => x.l.Auditor == filter.SupervisorId.Value)
+    };
+
+    var grouped = await query
+        .GroupBy(x => x.l.Agent)
+        .Select(g => new AgentScoreDto
         {
-            var dateFrom = filter.DateFrom.Date;
-            var dateTo   = filter.DateTo.Date.AddDays(1).AddSeconds(-1);
+            Agent = g.Key ?? string.Empty,
+            Score = g.Average(x => (double?)x.sv.Score) ?? 0
+        })
+        .ToListAsync();
 
-            var allowedCampagnes = await GetAllowedCampagnes(userId, userRole, siteId);
-
-            var query =
-                from sv in _db.LsSurveys
-                join l  in _db.Ls                on sv.LsId            equals l.Id
-                join cc in _db.LsCalledCampaigns on l.CalledCampaignId equals cc.Id
-                where sv.CreateDate >= dateFrom
-                   && sv.CreateDate <= dateTo
-                   && sv.IsSaved == 1
-                select new { sv, l, cc };
-
-            query = userRole switch
-            {
-                2 => query.Where(x =>
-                        allowedCampagnes.Contains(x.cc.CampagneDid!) &&
-                        x.cc.Site == siteId &&
-                        (siteId == 4 ? x.l.AgentId > 6000 : x.l.AgentId < 6000)),
-
-                3 => filter.AllSupervisors
-    ? query.Where(x =>
-        siteId == 4 ? x.l.AgentId > 6000 : x.l.AgentId < 6000)
-    : query.Where(x =>
-        x.l.Auditor == (filter.SupervisorId ?? userId) &&  // ← SupervisorId ou fallback userId
-        (siteId == 4 ? x.l.AgentId > 6000 : x.l.AgentId < 6000)),
-                _ => query
-            };
-
-            var grouped = await query
-                .GroupBy(x => x.l.Agent)
-                .Select(g => new AgentScoreDto
-                {
-                    Agent = g.Key ?? string.Empty,
-                    Score = g.Average(x => (double?)x.sv.Score) ?? 0
-                })
-                .ToListAsync();
-
-            return sortDirection == "Ascending"
-                ? grouped.OrderBy(x => x.Score)
-                : grouped.OrderByDescending(x => x.Score);
-        }
+    return sortDirection == "Ascending"
+        ? grouped.OrderBy(x => x.Score)
+        : grouped.OrderByDescending(x => x.Score);
+}
 
         // ─── Program Level ─────────────────────────────────────────────────────
         public async Task<IEnumerable<ProgramLevelDto>> GetProgramLevelAsync(

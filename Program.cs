@@ -112,6 +112,7 @@ builder.Services.AddScoped<IStatistiqueRepository, StatistiqueRepository>();
 builder.Services.AddScoped<IEvaluationRepository, EvaluationRepository>();
 // Ajouter avec vos autres services
 builder.Services.AddScoped<IUserDashboardRepository, UserDashboardRepository>();
+builder.Services.AddScoped<ISectionStatRepository, SectionStatRepository>();
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {

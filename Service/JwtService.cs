@@ -54,6 +54,8 @@ public class JwtService
             new Claim("userId",    user.Id.ToString()),
             new Claim("userLogin", user.Login),
             new Claim("userRole",  roleName),
+                    new Claim("siteId",    user.SiteId.ToString()), // ✅ manquait
+
         };
 
         var key   = new SymmetricSecurityKey(
