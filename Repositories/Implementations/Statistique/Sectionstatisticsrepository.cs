@@ -6,18 +6,14 @@ using System.Text.Json;
 
 namespace scoring_Backend.Repositories.Implementations.Statistique
 {
-    /// <summary>
-    /// Remplace les 6 pages ASPX redondantes par une seule requête paramétrée.
-    /// La logique de pivot est déléguée au frontend React.
-    /// </summary>
     public class StatistiqueRepository2 : IStatistiqueRepository2
     {
         private readonly string _connectionString;
 
         public StatistiqueRepository2(IConfiguration config)
         {
-            _connectionString = config.GetConnectionString("SQR_REC")
-                ?? throw new InvalidOperationException("Connection string 'SQR_REC' not found.");
+            _connectionString = config.GetConnectionString("SqrScoring")
+                ?? throw new InvalidOperationException("Connection string 'SqrScoring' not found.");
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -27,38 +23,34 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
         {
             var rows = new List<StatistiqueRowDto>();
 
-            // La requête joint Ls_survey et Ls_surveyItem (LEFT JOIN) pour couvrir
-            // tous les anciens rapports en un seul appel.
             var sql = new StringBuilder(@"
                 SELECT
-                    s.Id                        AS SurveyId,
+                    s.Id                            AS SurveyId,
                     s.CreateDate,
                     s.Score,
                     s.Memo,
-                    s.Is_saved,
                     l.AgentId,
                     l.Agent,
-                    l.Auditor                   AS AuditorId,
-                    u.FirstName + ' ' + u.LastName AS AuditorName,
-                    l.Ls_CalledCampaign_Id      AS CampaignId,
-                    c.Description               AS Campaign,
-                    s.FullPeriode,
-                    r.Rec_IdLink                AS RecordLink,
-                    si.Id                       AS ItemId,
-                    si.Value                    AS ItemValue,
-                    si.Memo                     AS ItemMemo,
+                    l.Auditor                       AS AuditorId,
+                    u.FirstName + ' ' + u.LastName  AS AuditorName,
+                    l.CalledCampaignId              AS CampaignId,
+                    c.Description                   AS Campaign,
+                    l.StartPeriode,
+                    l.EndPeriode,
+                    si.Id                           AS ItemId,
+                    si.Value                        AS ItemValue,
+                    si.Memo                         AS ItemMemo,
                     ti.Question,
-                    ti.Id                       AS QuestionId,
-                    tg.Description              AS Section,
-                    tg.Id                       AS SectionId
+                    ti.Id                           AS QuestionId,
+                    tg.Description                  AS Section,
+                    tg.Id                           AS SectionId
                 FROM [SQR_REC].[dbo].[Ls_survey] s
-                INNER JOIN [SQR_REC].[dbo].[Ls] l ON l.Id = s.Ls_Id
-                LEFT JOIN [SQR_Admin].[dbo].[Users] u ON u.ID = l.Auditor
-                LEFT JOIN [SQR_REC].[dbo].[Ls_CalledCampaign] c ON c.Id = l.Ls_CalledCampaign_Id
-                LEFT JOIN [SQR_REC].[dbo].[recordData] r ON r.Id = l.recordData_Id
-                LEFT JOIN [SQR_REC].[dbo].[Ls_surveyItem] si ON si.Ls_survey_Id = s.Id
-                LEFT JOIN [SQR_REC].[dbo].[Ls_templateItem] ti ON ti.Id = si.Ls_templateItem_Id
-                LEFT JOIN [SQR_REC].[dbo].[Ls_templateItemGroup] tg ON tg.Id = ti.Ls_templateItemGroup_Id
+                INNER JOIN [SQR_REC].[dbo].[Ls] l           ON l.Id = s.LsId
+                LEFT JOIN [SQR_Admin].[dbo].[Users] u        ON u.ID = l.Auditor
+                LEFT JOIN [SQR_REC].[dbo].[Ls_CalledCampaign] c ON c.Id = l.CalledCampaignId
+                LEFT JOIN [SQR_REC].[dbo].[Ls_surveyItem] si ON si.SurveyId = s.Id
+                LEFT JOIN [SQR_REC].[dbo].[Ls_templateItem] ti ON ti.Id = si.ItemId
+                LEFT JOIN [SQR_REC].[dbo].[Ls_templateItemGroup] tg ON tg.Id = ti.GroupId
                 WHERE s.Is_saved = 1
                   AND s.CreateDate >= @DateDebut
                   AND s.CreateDate <= @DateFin
@@ -75,7 +67,7 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
             // Filtre campagne
             if (f.CampaignId.HasValue)
             {
-                sql.Append(" AND l.Ls_CalledCampaign_Id = @CampaignId");
+                sql.Append(" AND l.CalledCampaignId = @CampaignId");
                 cmd.Parameters.AddWithValue("@CampaignId", f.CampaignId.Value);
             }
 
@@ -96,9 +88,8 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
             // Restriction par rôle
             if (f.UserRole == 2)
             {
-                // Manager : campagnes autorisées de son site
                 sql.Append(@"
-                  AND l.Ls_CalledCampaign_Id IN (
+                  AND l.CalledCampaignId IN (
                       SELECT uc.CampagneId FROM [SQR_Admin].[dbo].[UsersCampagne] uc
                       WHERE uc.UserId = @UserId AND uc.SiteId = @SiteId
                   )");
@@ -107,7 +98,6 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
             }
             else if (f.UserRole == 3 && !f.AllSupervisors)
             {
-                // Superviseur : uniquement ses agents
                 sql.Append(@"
                   AND l.AgentId IN (
                       SELECT ua.AgentId FROM [SQR_Admin].[dbo].[UsersAgent] ua
@@ -125,92 +115,141 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
             {
                 rows.Add(new StatistiqueRowDto
                 {
-                    SurveyId    = reader.GetInt32(reader.GetOrdinal("SurveyId")),
-                    CreateDate  = reader.GetDateTime(reader.GetOrdinal("CreateDate")),
-                    Score       = reader.IsDBNull(reader.GetOrdinal("Score")) ? 0 : reader.GetDouble(reader.GetOrdinal("Score")),
-                    Memo        = reader.IsDBNull(reader.GetOrdinal("Memo")) ? null : reader.GetString(reader.GetOrdinal("Memo")),
-                    AgentId     = reader.GetInt32(reader.GetOrdinal("AgentId")),
-                    Agent       = reader.IsDBNull(reader.GetOrdinal("Agent")) ? "" : reader.GetString(reader.GetOrdinal("Agent")),
-                    AuditorId   = reader.IsDBNull(reader.GetOrdinal("AuditorId")) ? 0 : reader.GetInt32(reader.GetOrdinal("AuditorId")),
-                    Auditor     = reader.IsDBNull(reader.GetOrdinal("AuditorName")) ? "" : reader.GetString(reader.GetOrdinal("AuditorName")),
-                    CampaignId  = reader.IsDBNull(reader.GetOrdinal("CampaignId")) ? null : reader.GetInt32(reader.GetOrdinal("CampaignId")),
-                    Campaign    = reader.IsDBNull(reader.GetOrdinal("Campaign")) ? null : reader.GetString(reader.GetOrdinal("Campaign")),
-                    FullPeriode = reader.IsDBNull(reader.GetOrdinal("FullPeriode")) ? null : reader.GetString(reader.GetOrdinal("FullPeriode")),
-                    RecordLink  = reader.IsDBNull(reader.GetOrdinal("RecordLink")) ? null : reader.GetString(reader.GetOrdinal("RecordLink")),
-                    ItemId      = reader.IsDBNull(reader.GetOrdinal("ItemId")) ? null : reader.GetInt32(reader.GetOrdinal("ItemId")),
-                    ItemValue   = reader.IsDBNull(reader.GetOrdinal("ItemValue")) ? null : reader.GetDouble(reader.GetOrdinal("ItemValue")),
-                    ItemMemo    = reader.IsDBNull(reader.GetOrdinal("ItemMemo")) ? null : reader.GetString(reader.GetOrdinal("ItemMemo")),
-                    Question    = reader.IsDBNull(reader.GetOrdinal("Question")) ? null : reader.GetString(reader.GetOrdinal("Question")),
-                    Section     = reader.IsDBNull(reader.GetOrdinal("Section")) ? null : reader.GetString(reader.GetOrdinal("Section")),
-                    SectionId   = reader.IsDBNull(reader.GetOrdinal("SectionId")) ? null : reader.GetInt32(reader.GetOrdinal("SectionId")),
+                    SurveyId     = reader.GetInt32(reader.GetOrdinal("SurveyId")),
+                    CreateDate   = reader.GetDateTime(reader.GetOrdinal("CreateDate")),
+                    Score        = reader.IsDBNull(reader.GetOrdinal("Score"))
+                                       ? 0
+                                       : (double)reader.GetFloat(reader.GetOrdinal("Score")),
+                    Memo         = reader.IsDBNull(reader.GetOrdinal("Memo"))
+                                       ? null : reader.GetString(reader.GetOrdinal("Memo")),
+                    AgentId      = reader.IsDBNull(reader.GetOrdinal("AgentId"))
+                                       ? 0 : reader.GetInt32(reader.GetOrdinal("AgentId")),
+                    Agent        = reader.IsDBNull(reader.GetOrdinal("Agent"))
+                                       ? "" : reader.GetString(reader.GetOrdinal("Agent")),
+                    AuditorId    = reader.IsDBNull(reader.GetOrdinal("AuditorId"))
+                                       ? 0 : reader.GetInt32(reader.GetOrdinal("AuditorId")),
+                    Auditor      = reader.IsDBNull(reader.GetOrdinal("AuditorName"))
+                                       ? "" : reader.GetString(reader.GetOrdinal("AuditorName")),
+                    CampaignId   = reader.IsDBNull(reader.GetOrdinal("CampaignId"))
+                                       ? null : reader.GetInt32(reader.GetOrdinal("CampaignId")),
+                    Campaign     = reader.IsDBNull(reader.GetOrdinal("Campaign"))
+                                       ? null : reader.GetString(reader.GetOrdinal("Campaign")),
+                    StartPeriode = reader.IsDBNull(reader.GetOrdinal("StartPeriode"))
+                                       ? null : reader.GetDateTime(reader.GetOrdinal("StartPeriode")),
+                    EndPeriode   = reader.IsDBNull(reader.GetOrdinal("EndPeriode"))
+                                       ? null : reader.GetDateTime(reader.GetOrdinal("EndPeriode")),
+                    ItemId       = reader.IsDBNull(reader.GetOrdinal("ItemId"))
+                                       ? null : reader.GetInt32(reader.GetOrdinal("ItemId")),
+                    ItemValue    = reader.IsDBNull(reader.GetOrdinal("ItemValue"))
+                                       ? null : (double?)reader.GetFloat(reader.GetOrdinal("ItemValue")),
+                    ItemMemo     = reader.IsDBNull(reader.GetOrdinal("ItemMemo"))
+                                       ? null : reader.GetString(reader.GetOrdinal("ItemMemo")),
+                    Question     = reader.IsDBNull(reader.GetOrdinal("Question"))
+                                       ? null : reader.GetString(reader.GetOrdinal("Question")),
+                    Section      = reader.IsDBNull(reader.GetOrdinal("Section"))
+                                       ? null : reader.GetString(reader.GetOrdinal("Section")),
+                    SectionId    = reader.IsDBNull(reader.GetOrdinal("SectionId"))
+                                       ? null : reader.GetInt32(reader.GetOrdinal("SectionId")),
                 });
             }
 
             return rows;
         }
 
-        // ─────────────────────────────────────────────────────────────────────────
-        // Agents
-        // ─────────────────────────────────────────────────────────────────────────
-        public async Task<IEnumerable<AgentDto>> GetAgentsAsync(int userId, int userRole, int siteId, bool allSupervisors)
+// ─────────────────────────────────────────────────────────────────────────
+// Agents
+// ─────────────────────────────────────────────────────────────────────────
+public async Task<IEnumerable<AgentDto>> GetAgentsAsync(
+    int userId, int userRole, int siteId, bool allSupervisors)
+{
+    var agents = new List<AgentDto>();
+
+    string sql = userRole switch
+    {
+        1 => @"SELECT DISTINCT AgentId AS Id, Agent AS Name
+               FROM [SQR_REC].[dbo].[Ls]
+               WHERE AgentId IS NOT NULL
+               ORDER BY Agent",
+
+        2 => @"SELECT DISTINCT l.AgentId AS Id, l.Agent AS Name
+               FROM [SQR_REC].[dbo].[Ls] l
+               INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua ON ua.AgentId = l.AgentId
+               WHERE ua.UserId = @UserId
+               ORDER BY l.Agent",
+
+        3 when allSupervisors => @"SELECT DISTINCT l.AgentId AS Id, l.Agent AS Name
+               FROM [SQR_REC].[dbo].[Ls] l
+               INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua ON ua.AgentId = l.AgentId
+               WHERE ua.SiteId = @SiteId
+               ORDER BY l.Agent",
+
+        _ => @"SELECT DISTINCT l.AgentId AS Id, l.Agent AS Name
+               FROM [SQR_REC].[dbo].[Ls] l
+               INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua ON ua.AgentId = l.AgentId
+               WHERE ua.UserId = @UserId
+               ORDER BY l.Agent"
+    };
+
+    using var conn = new SqlConnection(_connectionString);
+    using var cmd = new SqlCommand(sql, conn);
+
+    // ✅ Ajouter les paramètres uniquement si nécessaires
+    if (sql.Contains("@UserId"))
+        cmd.Parameters.AddWithValue("@UserId", userId);
+
+    if (sql.Contains("@SiteId"))
+        cmd.Parameters.AddWithValue("@SiteId", siteId);
+
+    await conn.OpenAsync();
+    using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+        agents.Add(new AgentDto
         {
-            var agents = new List<AgentDto>();
-            string sql = userRole switch
-            {
-                1 => "SELECT DISTINCT AgentId AS Id, Agent AS Name FROM [SQR_REC].[dbo].[Ls] ORDER BY Agent",
-                2 => @"SELECT DISTINCT l.AgentId AS Id, l.Agent AS Name
-                       FROM [SQR_REC].[dbo].[Ls] l
-                       INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua ON ua.AgentId = l.AgentId
-                       WHERE ua.UserId = @UserId ORDER BY l.Agent",
-                3 when allSupervisors => @"SELECT DISTINCT l.AgentId AS Id, l.Agent AS Name
-                       FROM [SQR_REC].[dbo].[Ls] l
-                       INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua ON ua.AgentId = l.AgentId
-                       WHERE ua.SiteId = @SiteId ORDER BY l.Agent",
-                _ => @"SELECT DISTINCT l.AgentId AS Id, l.Agent AS Name
-                       FROM [SQR_REC].[dbo].[Ls] l
-                       INNER JOIN [SQR_Admin].[dbo].[UsersAgent] ua ON ua.AgentId = l.AgentId
-                       WHERE ua.UserId = @UserId ORDER BY l.Agent"
-            };
+            Id   = reader.GetInt32(0),
+            Name = reader.GetString(1)
+        });
 
-            using var conn = new SqlConnection(_connectionString);
-            using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@UserId", userId);
-            cmd.Parameters.AddWithValue("@SiteId", siteId);
-            await conn.OpenAsync();
-            using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-                agents.Add(new AgentDto { Id = reader.GetInt32(0), Name = reader.GetString(1) });
+    return agents;
+}
 
-            return agents;
-        }
+// ─────────────────────────────────────────────────────────────────────────
+// Campagnes — utilise SqrAdminContext + jointure cross-database
+// ─────────────────────────────────────────────────────────────────────────
+public async Task<IEnumerable<CampaignDto>> GetCampaignsAsync(int userId, int siteId)
+{
+    // ✅ Log pour déboguer
+    Console.WriteLine($"[Campaigns] userId={userId}, siteId={siteId}");
 
-        // ─────────────────────────────────────────────────────────────────────────
-        // Campagnes
-        // ─────────────────────────────────────────────────────────────────────────
-        public async Task<IEnumerable<CampaignDto>> GetCampaignsAsync(int userId, int siteId)
+    const string sql = @"
+        SELECT DISTINCT c.Id, c.Description
+        FROM [SQR_REC].[dbo].[Ls_CalledCampaign] c
+        INNER JOIN [SQR_Admin].[dbo].[UsersCampagne] uc
+            ON uc.CampagneId = CAST(c.Id AS NVARCHAR(64))
+        WHERE uc.UserId = @UserId AND uc.SiteId = @SiteId AND c.Status = 1
+        ORDER BY c.Description";
+
+    var list = new List<CampaignDto>();
+    using var conn = new SqlConnection(_connectionString);
+    using var cmd  = new SqlCommand(sql, conn);
+    cmd.Parameters.AddWithValue("@UserId", userId);
+    cmd.Parameters.AddWithValue("@SiteId", siteId);
+
+    await conn.OpenAsync();
+    using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+        list.Add(new CampaignDto
         {
-            const string sql = @"
-                SELECT c.Id, c.Description
-                FROM [SQR_REC].[dbo].[Ls_CalledCampaign] c
-                INNER JOIN [SQR_Admin].[dbo].[UsersCampagne] uc ON uc.CampagneId = c.CampagneDID
-                WHERE uc.UserId = @UserId AND uc.SiteId = @SiteId AND c.Status = 1
-                ORDER BY c.Description";
+            Id          = reader.GetInt32(0),
+            Description = reader.GetString(1)
+        });
 
-            var list = new List<CampaignDto>();
-            using var conn = new SqlConnection(_connectionString);
-            using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@UserId", userId);
-            cmd.Parameters.AddWithValue("@SiteId", siteId);
-            await conn.OpenAsync();
-            using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-                list.Add(new CampaignDto { Id = reader.GetInt32(0), Description = reader.GetString(1) });
-
-            return list;
-        }
+    // ✅ Log résultat
+    Console.WriteLine($"[Campaigns] {list.Count} résultats trouvés");
+    return list;
+}
 
         // ─────────────────────────────────────────────────────────────────────────
-        // Export (CSV simple — pour PDF/XLS utiliser une lib dédiée)
+        // Export
         // ─────────────────────────────────────────────────────────────────────────
         public async Task<byte[]> ExportAsync(StatistiqueExportDto request)
         {
@@ -233,7 +272,6 @@ namespace scoring_Backend.Repositories.Implementations.Statistique
                 return Encoding.UTF8.GetBytes(sb.ToString());
             }
 
-            // Pour les autres formats, retourner JSON encodé (à remplacer par une lib PDF/XLS)
             return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(data));
         }
 

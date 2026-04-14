@@ -36,8 +36,8 @@ namespace scoring_Backend.DTO.Statistique
         // ── Identifiants ────────────────────────────────────────────────
         public int SurveyId { get; set; }
         public int? RecordId { get; set; }
-        public string? RecordLink { get; set; }
-
+public DateTime? StartPeriode { get; set; }
+public DateTime? EndPeriode   { get; set; }
         // ── Dimensions temporelles ───────────────────────────────────────
         public DateTime CreateDate { get; set; }
         public int Year => CreateDate.Year;
@@ -54,7 +54,6 @@ namespace scoring_Backend.DTO.Statistique
         // ── Campagne ─────────────────────────────────────────────────────
         public int? CampaignId { get; set; }
         public string? Campaign { get; set; }
-        public string? FullPeriode { get; set; }
 
         // ── Score global ─────────────────────────────────────────────────
         public double Score { get; set; }
