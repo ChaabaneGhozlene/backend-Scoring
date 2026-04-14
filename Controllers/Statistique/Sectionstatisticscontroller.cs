@@ -1,60 +1,71 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using scoring_Backend.DTO.Statistique;
 using scoring_Backend.Repositories.Interfaces.Statistique;
-using System.Security.Claims;
 
 namespace scoring_Backend.Controllers.Statistique
 {
-    [Authorize]
     [ApiController]
-    [Route("api/statistique/[controller]")]
-    public class SectionStatController : ControllerBase
+    [Route("api/statistique2")]
+    public class StatistiqueController2 : ControllerBase
     {
-        private readonly ISectionStatRepository _repo;
+        private readonly IStatistiqueRepository2 _repo;
 
-        public SectionStatController(ISectionStatRepository repo)
+        public StatistiqueController2(IStatistiqueRepository2 repo)
         {
             _repo = repo;
         }
 
-        // POST api/statistique/sectionstat/search
-        [HttpPost("search")]
-        public async Task<IActionResult> Search([FromBody] SectionStatFilterDto filter)
+        /// <summary>
+        /// Retourne les données brutes filtrées depuis Ls_survey / Ls_surveyItem.
+        /// Le frontend construit le pivot dynamiquement.
+        /// </summary>
+        [HttpGet("data")]
+        public async Task<IActionResult> GetData([FromQuery] StatistiqueFilterDto filter)
         {
-            if (filter.DateFin < filter.DateDebut)
-                return BadRequest(new { message = "La date de fin doit être >= à la date de début." });
+            if (filter.DateDebut > filter.DateFin)
+                return BadRequest("La date de début doit être antérieure à la date de fin.");
 
-            // Récupérer l'utilisateur connecté depuis le JWT
-            var userId   = int.TryParse(User.FindFirstValue("userId"),   out var uid)  ? uid  : (int?)null;
-            var userRole = int.TryParse(User.FindFirstValue("userRole"),  out var role) ? role : (int?)null;
-            var siteId   = int.TryParse(User.FindFirstValue("siteId"),    out var site) ? site : (int?)null;
-
-            var result = await _repo.GetSectionStatsAsync(filter, userId, userRole, siteId);
-            return Ok(result);
+            var data = await _repo.GetStatistiqueDataAsync(filter);
+            return Ok(data);
         }
 
-        // POST api/statistique/sectionstat/export
-        // Renvoie un fichier CSV simple (le front peut aussi exporter via xlsx-js / jsPDF)
-        [HttpPost("export")]
-        public async Task<IActionResult> Export(
-            [FromBody] SectionStatFilterDto filter,
-            [FromQuery] string format = "csv")
+        /// <summary>
+        /// Retourne la liste des agents disponibles selon le rôle de l'utilisateur connecté.
+        /// </summary>
+        [HttpGet("agents")]
+        public async Task<IActionResult> GetAgents([FromQuery] int userId, [FromQuery] int userRole, [FromQuery] int siteId, [FromQuery] bool allSupervisors = true)
         {
-            var userId   = int.TryParse(User.FindFirstValue("userId"),   out var uid)  ? uid  : (int?)null;
-            var userRole = int.TryParse(User.FindFirstValue("userRole"),  out var role) ? role : (int?)null;
-            var siteId   = int.TryParse(User.FindFirstValue("siteId"),    out var site) ? site : (int?)null;
+            var agents = await _repo.GetAgentsAsync(userId, userRole, siteId, allSupervisors);
+            return Ok(agents);
+        }
 
-            var result = await _repo.GetSectionStatsAsync(filter, userId, userRole, siteId);
+        /// <summary>
+        /// Retourne les campagnes qualité accessibles à l'utilisateur.
+        /// </summary>
+        [HttpGet("campaigns")]
+        public async Task<IActionResult> GetCampaigns([FromQuery] int userId, [FromQuery] int siteId)
+        {
+            var campaigns = await _repo.GetCampaignsAsync(userId, siteId);
+            return Ok(campaigns);
+        }
 
-            // Export CSV simple
-            var csv = new System.Text.StringBuilder();
-            csv.AppendLine("Section ID;Section;Agent;Agent ID;Campaign;Score (%)");
-            foreach (var row in result.Rows)
-                csv.AppendLine($"{row.SectionId};{row.Section};{row.Agent};{row.AgentId};{row.Campaign};{row.ScorePercent}");
-
-            var bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
-            return File(bytes, "text/csv", "SectionStats.csv");
+        /// <summary>
+        /// Export en PDF / XLS / CSV / RTF côté serveur (optionnel si le frontend exporte lui-même).
+        /// </summary>
+        [HttpPost("export")]
+        public async Task<IActionResult> Export([FromBody] StatistiqueExportDto request)
+        {
+            var fileBytes = await _repo.ExportAsync(request);
+            string contentType = request.Format switch
+            {
+                "PDF" => "application/pdf",
+                "XLS" => "application/vnd.ms-excel",
+                "CSV" => "text/csv",
+                "RTF" => "application/rtf",
+                _ => "application/octet-stream"
+            };
+            string fileName = $"statistique_{DateTime.Now:yyyyMMdd_HHmmss}.{request.Format.ToLower()}";
+            return File(fileBytes, contentType, fileName);
         }
     }
 }

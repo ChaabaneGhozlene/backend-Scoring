@@ -1,12 +1,20 @@
 using scoring_Backend.DTO.Statistique;
+
 namespace scoring_Backend.Repositories.Interfaces.Statistique
 {
-    public interface ISectionStatRepository
+    public interface IStatistiqueRepository2
     {
-        Task<SectionStatResponseDto> GetSectionStatsAsync(
-            SectionStatFilterDto filter,
-            int? userId   = null,
-            int? userRole = null,
-            int? siteId   = null);
+        /// <summary>
+        /// Requête principale : retourne les lignes plates depuis Ls_survey + Ls_surveyItem.
+        /// Tous les anciens rapports (NoteGlobale, SuiviColab, SuiviSuperviseur, ProgramLevel…)
+        /// consomment cet unique endpoint avec des filtres différents.
+        /// </summary>
+        Task<IEnumerable<StatistiqueRowDto>> GetStatistiqueDataAsync(StatistiqueFilterDto filter);
+
+        Task<IEnumerable<AgentDto>> GetAgentsAsync(int userId, int userRole, int siteId, bool allSupervisors);
+
+        Task<IEnumerable<CampaignDto>> GetCampaignsAsync(int userId, int siteId);
+
+        Task<byte[]> ExportAsync(StatistiqueExportDto request);
     }
 }

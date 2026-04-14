@@ -14,6 +14,7 @@ using scoring_Backend.Repositories.Interfaces.Configuration;
 using scoring_Backend.Repositories.Implementations.Configuration;
 using scoring_Backend.Repositories.Interfaces.Statistique;
 using scoring_Backend.Repositories.Implementations.Statistique;
+
 IdentityModelEventSource.ShowPII = true;
 var builder = WebApplication.CreateBuilder(args);
 /*builder.Services.AddHttpContextAccessor();
@@ -108,11 +109,11 @@ builder.Services.AddScoped<IAgentTeamRepository, AgentTeamRepository>();
 builder.Services.AddScoped<IAgentMailConfigRepository, AgentMailConfigRepository>();
 builder.Services.AddScoped<IEvaluationListRepository, EvaluationListRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
-builder.Services.AddScoped<IStatistiqueRepository, StatistiqueRepository>();
+builder.Services.AddScoped<IStatistiqueRepository, scoring_Backend.Repositories.Implementations.Statistique.StatistiqueRepository>();
 builder.Services.AddScoped<IEvaluationRepository, EvaluationRepository>();
 // Ajouter avec vos autres services
 builder.Services.AddScoped<IUserDashboardRepository, UserDashboardRepository>();
-builder.Services.AddScoped<ISectionStatRepository, SectionStatRepository>();
+builder.Services.AddScoped<IStatistiqueRepository2,StatistiqueRepository2>();
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {

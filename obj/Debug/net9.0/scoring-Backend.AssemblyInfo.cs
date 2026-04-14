@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("scoring-Backend")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+704e73d9d9a938eb6d35a850d55dc6edbdc788af")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+bb8ebc291970a8b99be0064da67aa2eaebcd3bdf")]
 [assembly: System.Reflection.AssemblyProductAttribute("scoring-Backend")]
 [assembly: System.Reflection.AssemblyTitleAttribute("scoring-Backend")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
