@@ -13,7 +13,7 @@ namespace scoring_Backend.Repositories.Interfaces.Statistique
 
         Task<IEnumerable<AgentDto>> GetAgentsAsync(int userId, int userRole, int siteId, bool allSupervisors);
 
-        Task<IEnumerable<CampaignDto>> GetCampaignsAsync(int userId, int siteId);
+        Task<IEnumerable<CampaignDto>> GetCampaignsAsync(int userId, int siteId,string userRole);
 
         Task<byte[]> ExportAsync(StatistiqueExportDto request);
     }

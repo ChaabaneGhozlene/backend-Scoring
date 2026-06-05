@@ -3,6 +3,7 @@
 // ============================================================
 
 using scoring_Backend.DTO;
+using scoring_Backend.DTO.Transcription;
 
 namespace scoring_Backend.Repositories.Interfaces.Evaluation
 {
@@ -45,5 +46,7 @@ namespace scoring_Backend.Repositories.Interfaces.Evaluation
 Task<MultiSurveyResponseDto> GetAllSurveysForRecordAsync(int recordId);
  Task<RecordFileDto?> GetRecordFilePathAsync(int recordId);
 Task<RecordScreenDto?> GetRecordScreenPathAsync(int recordId);
+Task<RecordTranscriptDto?> GetRecordTranscriptAsync(int recordId);
+
     }
 }

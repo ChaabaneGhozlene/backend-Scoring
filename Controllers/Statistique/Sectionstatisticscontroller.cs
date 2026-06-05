@@ -88,21 +88,29 @@ namespace scoring_Backend.Controllers.Statistique
             );
             return Ok(agents);
         }
-
-        /// <summary>
-        /// Retourne les campagnes qualité accessibles à l'utilisateur.
-        /// userId et siteId proviennent du JWT.
-        /// </summary>
-        [HttpGet("campaigns")]
-        public async Task<IActionResult> GetCampaigns()
-        {
-            var campaigns = await _repo.GetCampaignsAsync(
-                userId: GetUserId(),
-                siteId: GetSiteId()
-            );
-            return Ok(campaigns);
-        }
-
+[HttpGet("campaigns")]
+public async Task<IActionResult> GetCampaigns()
+{
+    try
+    {
+        var userId = GetUserId();
+        var siteId = GetSiteId();
+        var userRole = User.FindFirstValue("userRole") ?? "Agent";
+        
+        Console.WriteLine($"=== GetCampaigns API ===");
+        Console.WriteLine($"userId={userId}, siteId={siteId}, userRole={userRole}");
+        Console.WriteLine($"Token: {User.FindFirstValue("userId")}");
+        
+        var campaigns = await _repo.GetCampaignsAsync(userId, siteId, userRole);
+        return Ok(campaigns);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"ERREUR GetCampaigns API: {ex.Message}");
+        Console.WriteLine($"STACK: {ex.StackTrace}");
+        return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
+    }
+}
         /// <summary>
         /// Export en CSV / JSON côté serveur.
         /// Les identifiants du filtre sont surchargés depuis le JWT.

@@ -23,7 +23,7 @@ namespace scoring_Backend.Repositories.Implementations.Evaluation
     RecordFilterDto filter, int userId, string userRole)
 {
     Console.WriteLine($"=== DEBUG === userId={userId}, userRole='{userRole}'");
-
+Console.WriteLine($"[FILTER] DateDebut={filter.DateDebut} | DateFin={filter.DateFin}");
     var query = _db.RecordData.AsQueryable();
 
     // ── Filtrage Agent (SQL) ──────────────────────────────────────────────

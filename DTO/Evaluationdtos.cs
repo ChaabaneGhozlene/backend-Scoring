@@ -93,6 +93,7 @@ public class RecordFileDto
         public string? GroupName    { get; set; }
         public int     GroupOrder   { get; set; }
         public string? Question     { get; set; }
+        public string ? Description   { get; set; }
         public string? Definition   { get; set; }
         public float   Value        { get; set; }
         public string? Memo         { get; set; }
@@ -106,6 +107,8 @@ public class RecordFileDto
     public class SaveEvaluationDto
     {
         public int     SurveyId     { get; set; }
+            public bool   IsAiEval     { get; set; } = false;  // ← nouveau
+
         public int?    CategoryId   { get; set; }
         public int?    CallReasonId { get; set; }
         public string? Memo         { get; set; }

@@ -213,41 +213,78 @@ public async Task<IEnumerable<AgentDto>> GetAgentsAsync(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Campagnes — utilise SqrAdminContext + jointure cross-database
+// Campagnes — Version corrigée pour SuperAdmin et Admin
 // ─────────────────────────────────────────────────────────────────────────
-public async Task<IEnumerable<CampaignDto>> GetCampaignsAsync(int userId, int siteId)
+public async Task<IEnumerable<CampaignDto>> GetCampaignsAsync(int userId, int siteId, string userRole)
 {
-    // ✅ Log pour déboguer
-    Console.WriteLine($"[Campaigns] userId={userId}, siteId={siteId}");
-
-    const string sql = @"
-        SELECT DISTINCT c.Id, c.Description
-        FROM [SQR_REC].[dbo].[Ls_CalledCampaign] c
-        INNER JOIN [SQR_Admin].[dbo].[UsersCampagne] uc
-            ON uc.CampagneId = CAST(c.Id AS NVARCHAR(64))
-        WHERE uc.UserId = @UserId AND uc.SiteId = @SiteId AND c.Status = 1
-        ORDER BY c.Description";
-
-    var list = new List<CampaignDto>();
-    using var conn = new SqlConnection(_connectionString);
-    using var cmd  = new SqlCommand(sql, conn);
-    cmd.Parameters.AddWithValue("@UserId", userId);
-    cmd.Parameters.AddWithValue("@SiteId", siteId);
-
-    await conn.OpenAsync();
-    using var reader = await cmd.ExecuteReaderAsync();
-    while (await reader.ReadAsync())
-        list.Add(new CampaignDto
+    Console.WriteLine($"[Campaigns] DEBUT - userId={userId}, siteId={siteId}, userRole={userRole}");
+    
+    try
+    {
+        var list = new List<CampaignDto>();
+        
+        using var conn = new SqlConnection(_connectionString);
+        Console.WriteLine($"[Campaigns] Connexion créée");
+        
+        string sql;
+        
+        if (userRole == "SuperAdmin")
         {
-            Id          = reader.GetInt32(0),
-            Description = reader.GetString(1)
-        });
-
-    // ✅ Log résultat
-    Console.WriteLine($"[Campaigns] {list.Count} résultats trouvés");
-    return list;
+            sql = @"
+                SELECT DISTINCT Id, Description
+                FROM [SQR_REC].[dbo].[Ls_CalledCampaign]
+                WHERE Status = 1
+                ORDER BY Description";
+            Console.WriteLine($"[Campaigns] SQL SuperAdmin");
+        }
+        else
+        {
+            sql = @"
+                SELECT DISTINCT c.Id, c.Description
+                FROM [SQR_REC].[dbo].[Ls_CalledCampaign] c
+                INNER JOIN [SQR_Admin].[dbo].[UsersCampagnes] uc 
+                    ON uc.CampagneId = c.Id
+                WHERE uc.UserId = @UserId 
+                  AND uc.SiteId = @SiteId 
+                  AND c.Status = 1
+                ORDER BY c.Description";
+            Console.WriteLine($"[Campaigns] SQL Admin");
+        }
+        
+        using var cmd = new SqlCommand(sql, conn);
+        
+        if (userRole != "SuperAdmin")
+        {
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@SiteId", siteId);
+            Console.WriteLine($"[Campaigns] Paramètres ajoutés: UserId={userId}, SiteId={siteId}");
+        }
+        
+        Console.WriteLine($"[Campaigns] Ouverture connexion...");
+        await conn.OpenAsync();
+        
+        Console.WriteLine($"[Campaigns] Exécution requête...");
+        using var reader = await cmd.ExecuteReaderAsync();
+        
+        while (await reader.ReadAsync())
+        {
+            list.Add(new CampaignDto
+            {
+                Id = reader.GetInt32(0),
+                Description = reader.IsDBNull(1) ? "" : reader.GetString(1)
+            });
+        }
+        
+        Console.WriteLine($"[Campaigns] SUCCES - {list.Count} campagnes trouvées");
+        return list;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Campaigns] ERREUR: {ex.Message}");
+        Console.WriteLine($"[Campaigns] STACK: {ex.StackTrace}");
+        throw;  // ← Important pour voir l'erreur dans la réponse
+    }
 }
-
         // ─────────────────────────────────────────────────────────────────────────
         // Export
         // ─────────────────────────────────────────────────────────────────────────

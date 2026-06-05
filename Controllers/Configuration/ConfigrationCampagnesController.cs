@@ -4,7 +4,8 @@ using scoring_Backend.DTO;
 using scoring_Backend.Repositories.Interfaces.Configuration;
 
 namespace scoring_Backend.Controllers.Configuration
-{   [Authorize]
+{
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class ConfigurationController : ControllerBase
@@ -30,9 +31,16 @@ namespace scoring_Backend.Controllers.Configuration
         public async Task<IActionResult> GetCustomers()
             => Ok(await _repo.GetCustomersAsync());
 
+        // FIX: excludeTemplateId est maintenant transmis correctement au repo
         [HttpGet("available-campaigns")]
         public async Task<IActionResult> GetAvailableCampaigns([FromQuery] int? excludeTemplateId)
             => Ok(await _repo.GetAvailableCampaignsAsync(excludeTemplateId));
+
+        [HttpGet("available-campaigns/by-site/{customerId:int}")]
+        public async Task<IActionResult> GetAvailableCampaignsBySite(
+            int customerId,
+            [FromQuery] int? templateId)
+            => Ok(await _repo.GetAvailableCampaignsBySiteAsync(customerId, templateId));
 
         // ── Templates ────────────────────────────────────────────────────────
 
@@ -47,40 +55,38 @@ namespace scoring_Backend.Controllers.Configuration
             return data is null ? NotFound() : Ok(data);
         }
 
-       [HttpPost("templates")]
-public async Task<IActionResult> CreateTemplate([FromBody] CreateLsTemplateDto dto)
-{
-    try
-    {
-        // 🔍 LOG pour voir ce qui arrive
-        Console.WriteLine($"=== CreateTemplate ===");
-        Console.WriteLine($"Description: {dto.Description}");
-        Console.WriteLine($"StartDate: {dto.StartDate}");
-        Console.WriteLine($"EndDate: {dto.EndDate}");
-        Console.WriteLine($"PeriodeId: {dto.LsTemplatePeriodeId}");
+        [HttpPost("templates")]
+        public async Task<IActionResult> CreateTemplate([FromBody] CreateLsTemplateDto dto)
+        {
+            try
+            {
+                if (await _repo.TemplateExistsByDescriptionAsync(dto.Description))
+                    return Conflict(new { message = "Un modèle avec ce nom existe déjà." });
 
-        if (await _repo.TemplateExistsByDescriptionAsync(dto.Description))
-            return Conflict(new { message = "Un modèle avec ce nom existe déjà." });
-
-        var id = await _repo.CreateTemplateAsync(dto);
-        return CreatedAtAction(nameof(GetTemplate), new { id }, new { id });
-    }
-    catch (Exception ex)
-    {
-        // 🔍 LOG l'erreur complète
-        Console.WriteLine($"ERREUR: {ex.Message}");
-        Console.WriteLine($"STACK: {ex.StackTrace}");
-        _logger.LogError(ex, "Erreur CreateTemplate");
-        return StatusCode(500, new { message = ex.Message, detail = ex.InnerException?.Message });
-    }
-}
+                var id = await _repo.CreateTemplateAsync(dto);
+                return CreatedAtAction(nameof(GetTemplate), new { id }, new { id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erreur CreateTemplate");
+                return StatusCode(500, new { message = ex.Message, detail = ex.InnerException?.Message });
+            }
+        }
 
         [HttpPut("templates/{id:int}")]
         public async Task<IActionResult> UpdateTemplate(int id, [FromBody] UpdateLsTemplateDto dto)
         {
-            if (await _repo.GetTemplateByIdAsync(id) is null) return NotFound();
-            await _repo.UpdateTemplateAsync(id, dto);
-            return NoContent();
+            try
+            {
+                if (await _repo.GetTemplateByIdAsync(id) is null) return NotFound();
+                await _repo.UpdateTemplateAsync(id, dto);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erreur UpdateTemplate id={Id}", id);
+                return StatusCode(500, new { message = ex.Message, detail = ex.InnerException?.Message });
+            }
         }
 
         [HttpDelete("templates/{id:int}")]
@@ -188,10 +194,5 @@ public async Task<IActionResult> CreateTemplate([FromBody] CreateLsTemplateDto d
             await _repo.DeleteCalledCampaignAsync(id);
             return NoContent();
         }
-[HttpGet("available-campaigns/by-site/{customerId:int}")]
-public async Task<IActionResult> GetAvailableCampaignsBySite(
-    int customerId,
-    [FromQuery] int? templateId)  // ✅ cette ligne doit exister
-    => Ok(await _repo.GetAvailableCampaignsBySiteAsync(customerId, templateId));
     }
 }

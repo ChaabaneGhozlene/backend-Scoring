@@ -2074,6 +2074,12 @@ public DbSet<ChartConfiguration> ChartConfigurations => Set<ChartConfiguration>(
                 .HasMaxLength(50)
                 .IsUnicode(false);
             entity.Property(e => e.StatusText).HasMaxLength(400);
+            entity.Property(e => e.Transcript)
+          .HasColumnName("Transcript");
+
+    entity.Property(e => e.DetectedLang)
+          .HasColumnName("DetectedLang")
+          .HasMaxLength(10);
         });
 
         modelBuilder.Entity<RecordFile>(entity =>

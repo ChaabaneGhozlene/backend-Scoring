@@ -26,8 +26,9 @@ public partial class LsSurvey
     public int? IsSaved { get; set; }
 
     public string? MemoActionTaken { get; set; }
+     public int? IdCategories { get; set; }
 
-    public int? IdCategories { get; set; }
+public byte? IsAiGenerated { get; set; }
 
     public int? IdCallReason { get; set; }
 

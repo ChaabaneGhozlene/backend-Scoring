@@ -11,6 +11,7 @@ using scoring_Backend.Repositories.Interfaces.Evaluation;
 using System.Net.Mail;
 using System.Text;
 using scoring_Backend.Models.Admin;
+using scoring_Backend.DTO.Transcription;
 
 namespace scoring_Backend.Repositories.Implementations.Evaluation
 {
@@ -453,6 +454,9 @@ resp.Auditor = auditorUser != null
     survey.UpdateBy        = userId;
     survey.UpdateDate      = now;
 
+    // ── Marquer l'évaluation IA ──────────────────────────────
+if (dto.IsAiEval)
+    survey.IsAiGenerated = 1;   // ← champ à ajouter en base (voir ci-dessous)
     if (dto.CategoryId.HasValue)
     {
         survey.IdCategories = dto.CategoryId.Value;
@@ -628,7 +632,7 @@ catch (Exception ex)
     if (record != null)
     {
         _log.LogDebug("SaveEval → Tentative envoi email pour recordId={RecordId}", record.Id);
-        await TrySendEmailAsync(survey, allSurveyItems, templateItems, record, dto.CcEmail);
+        await TrySendEmailAsync(survey, allSurveyItems, templateItems, record, dto.CcEmail, dto.IsAiEval);
     }
     else
     {
@@ -791,10 +795,17 @@ private async Task TrySendEmailAsync(
     List<LsSurveyItem> items,
     List<LsTemplateItem> templateItems,
     RecordDatum record,
-    string? cc)
+    string? cc,
+    bool isAiEval=false)
 {
     try
     {
+        var evalTypeLabel = isAiEval
+        ? "🤖 Évaluation automatique par Intelligence Artificielle"
+        : "👤 Évaluation manuelle par un auditeur";
+            var evalTypeBg     = isAiEval ? "#eff6ff" : "#f0fdf4";
+    var evalTypeBorder = isAiEval ? "#bfdbfe" : "#86efac";
+    var evalTypeColor  = isAiEval ? "#1d4ed8" : "#16a34a";
         // ── 1. Email agent ────────────────────────────────────
         var agentEmail = await _db.TListAgentEmails
             .Where(e => e.Oidagent == record.AgentOid)
@@ -823,7 +834,8 @@ private async Task TrySendEmailAsync(
         var templateDict = templateItems.ToDictionary(t => t.Id);
 
         // ── 5. Générer le PDF ─────────────────────────────────
-        var pdfBytes = GeneratePdf(survey, items, templateDict, record, agentName);
+        var pdfBytes = GeneratePdf(survey, items, templateDict, record, agentName, isAiEval);
+
         var pdfName  = $"evaluation_{safeName}_{DateTime.Now:yyyyMMdd}.pdf";
 
         // ── 6. Score couleur pour l'email ─────────────────────
@@ -831,7 +843,14 @@ private async Task TrySendEmailAsync(
         var scoreBg     = survey.Score >= 80 ? "#f0fdf4" : survey.Score >= 60 ? "#fffbeb" : "#fef2f2";
         var scoreBorder = survey.Score >= 80 ? "#86efac" : survey.Score >= 60 ? "#fcd34d" : "#fca5a5";
         var scoreLabel  = survey.Score >= 80 ? "✅ Excellent" : survey.Score >= 60 ? "⚠️ À améliorer" : "❌ Insuffisant";
-
+        var evalTypeBadge = $@"
+    <div style='background:{evalTypeBg};border:1px solid {evalTypeBorder};
+                border-radius:8px;padding:10px 16px;margin-bottom:20px;
+                border-left:4px solid {evalTypeColor};'>
+      <span style='font-size:12px;font-weight:700;color:{evalTypeColor};'>
+        {evalTypeLabel}
+      </span>
+    </div>";
         // ── 7. Corps email ────────────────────────────────────
         var html = $@"
 <!DOCTYPE html>
@@ -871,11 +890,13 @@ private async Task TrySendEmailAsync(
             <div style='font-size:17px;font-weight:700;color:#111827;margin-bottom:8px;'>
               Bonjour, <span style='color:#dc2626;'>{agentName}</span> 👋
             </div>
+            {evalTypeBadge}
             <div style='font-size:13px;color:#6b7280;line-height:1.8;margin-bottom:28px;'>
               Votre évaluation qualité du
               <strong style='color:#374151;'>{DateTime.Now:dd/MM/yyyy}</strong>
               est disponible. Veuillez consulter le rapport en pièce jointe.
             </div>
+            
 
             <!-- Score card -->
             <div style='background:{scoreBg};border:1px solid {scoreBorder};
@@ -1015,8 +1036,13 @@ private byte[] GeneratePdf(
     List<LsSurveyItem> items,
     Dictionary<int, LsTemplateItem> templateDict,
     RecordDatum record,
-    string agentName)
+    string agentName,
+    bool isAiEval = false)
 {
+        var evalTypeLabel = isAiEval
+        ? "🤖 Évaluation IA automatique"
+        : "👤 Évaluation manuelle";
+
     QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
     var initiales = string.Concat(
@@ -1065,59 +1091,63 @@ private byte[] GeneratePdf(
             // ── CONTENU ───────────────────────────────────────
             page.Content().PaddingTop(20).Column(col =>
             {
-                // ── Score + Infos ─────────────────────────────
-                col.Item()
-                   .Border(1).BorderColor("#e5e7eb")
-                   .Background("#f9fafb")
-                   .Padding(16).Row(row =>
+               col.Item()
+       .Border(1).BorderColor("#e5e7eb")
+       .Background("#f9fafb")
+       .Padding(16).Row(row =>
+       {
+           row.RelativeItem(2).Column(c =>
+           {
+               c.Item().Text("SCORE GLOBAL")
+                .FontSize(8).FontColor("#9ca3af").Bold().LetterSpacing(0.05f);
+               c.Item().PaddingTop(4).Text($"{survey.Score:F1}%")
+                .FontSize(32).Bold().FontColor(scoreColor);
+               c.Item().Text(scoreLabel)
+                .FontSize(9).Bold().FontColor(scoreColor);
+           });
+
+           row.ConstantItem(1).Background("#e5e7eb");
+
+           row.RelativeItem(3).PaddingLeft(16).Column(c =>
+           {
+               c.Item().Row(r =>
+               {
+                   r.RelativeItem().Column(inner =>
                    {
-                       // Score
-                       row.RelativeItem(2).Column(c =>
-                       {
-                           c.Item().Text("SCORE GLOBAL")
-                            .FontSize(8).FontColor("#9ca3af").Bold().LetterSpacing(0.05f);
-                           c.Item().PaddingTop(4).Text($"{survey.Score:F1}%")
-                            .FontSize(32).Bold().FontColor(scoreColor);
-                           c.Item().Text(scoreLabel)
-                            .FontSize(9).Bold().FontColor(scoreColor);
-                       });
-
-                       // Séparateur
-                       row.ConstantItem(1).Background("#e5e7eb");
-
-                       // Dates + Indice
-                       row.RelativeItem(3).PaddingLeft(16).Column(c =>
-                       {
-                           c.Item().Row(r =>
-                           {
-                               r.RelativeItem().Column(inner =>
-                               {
-                                   inner.Item().Text("DATE ENREGISTREMENT")
-                                        .FontSize(8).FontColor("#9ca3af").Bold();
-                                   inner.Item().PaddingTop(2)
-                                        .Text(record.RecordDate.HasValue
-                                            ? record.RecordDate.Value.ToString("dd/MM/yyyy") : "—")
-                                        .FontSize(11).Bold();
-                               });
-                               r.RelativeItem().Column(inner =>
-                               {
-                                   inner.Item().Text("DATE ÉVALUATION")
-                                        .FontSize(8).FontColor("#9ca3af").Bold();
-                                   inner.Item().PaddingTop(2)
-                                        .Text(DateTime.Now.ToString("dd/MM/yyyy"))
-                                        .FontSize(11).Bold();
-                               });
-                               r.RelativeItem().Column(inner =>
-                               {
-                                   inner.Item().Text("INDICE")
-                                        .FontSize(8).FontColor("#9ca3af").Bold();
-                                   inner.Item().PaddingTop(2)
-                                        .Text(record.RecIdLink?.ToString() ?? "—")
-                                        .FontSize(11).Bold();
-                               });
-                           });
-                       });
+                       inner.Item().Text("DATE ENREGISTREMENT")
+                            .FontSize(8).FontColor("#9ca3af").Bold();
+                       inner.Item().PaddingTop(2)
+                            .Text(record.RecordDate.HasValue
+                                ? record.RecordDate.Value.ToString("dd/MM/yyyy") : "—")
+                            .FontSize(11).Bold();
                    });
+                   r.RelativeItem().Column(inner =>
+                   {
+                       inner.Item().Text("DATE ÉVALUATION")
+                            .FontSize(8).FontColor("#9ca3af").Bold();
+                       inner.Item().PaddingTop(2)
+                            .Text(DateTime.Now.ToString("dd/MM/yyyy"))
+                            .FontSize(11).Bold();
+                   });
+                   r.RelativeItem().Column(inner =>
+                   {
+                       inner.Item().Text("INDICE")
+                            .FontSize(8).FontColor("#9ca3af").Bold();
+                       inner.Item().PaddingTop(2)
+                            .Text(record.RecIdLink?.ToString() ?? "—")
+                            .FontSize(11).Bold();
+                   });
+               });
+           });
+       });
+
+    // ── Badge IA — APRÈS le Row, pas dedans ──────
+    col.Item().PaddingTop(8)
+       .Background(isAiEval ? "#eff6ff" : "#f0fdf4")
+       .BorderLeft(4).BorderColor(isAiEval ? "#1d4ed8" : "#16a34a")
+       .Padding(10).Text(isAiEval ? "🤖 Évaluation IA automatique" : "👤 Évaluation manuelle")
+       .FontSize(9).Bold()
+       .FontColor(isAiEval ? "#1d4ed8" : "#16a34a");
 
                 // ── Commentaire ───────────────────────────────
                 if (!string.IsNullOrWhiteSpace(survey.Memo))
@@ -1325,6 +1355,36 @@ public async Task<RecordScreenDto?> GetRecordScreenPathAsync(int recordId)
     Console.WriteLine($"🎬 File.Exists={System.IO.File.Exists(record?.ScreenSource ?? "")}");
 
     return record;
+}
+public async Task<RecordTranscriptDto?> GetRecordTranscriptAsync(int recordId)
+{
+    var conn    = _db.Database.GetDbConnection();
+    var wasOpen = conn.State == System.Data.ConnectionState.Open;
+    try
+    {
+        if (!wasOpen) await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT ID, Rec_Filename, Transcript, DetectedLang FROM RecordData WHERE ID = @id";
+        var p = cmd.CreateParameter();
+        p.ParameterName = "@id";
+        p.Value         = recordId;
+        cmd.Parameters.Add(p);
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) return null;
+
+        return new RecordTranscriptDto
+        {
+            Id           = reader.GetInt32(0),
+            FilePath     = reader.IsDBNull(1) ? null : reader.GetString(1),
+            Transcript   = reader.IsDBNull(2) ? null : reader.GetString(2),
+            DetectedLang = reader.IsDBNull(3) ? null : reader.GetString(3),
+        };
+    }
+    finally
+    {
+        if (!wasOpen) await conn.CloseAsync();
+    }
 }
 
     }

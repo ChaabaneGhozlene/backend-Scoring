@@ -89,13 +89,6 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             await using var tran = conn.BeginTransaction();
             try
             {
-                Console.WriteLine("╔══════════════════════════════════════════════╗");
-                Console.WriteLine("║        CreateTemplateAsync — START           ║");
-                Console.WriteLine("╚══════════════════════════════════════════════╝");
-                Console.WriteLine($"  Description  : {dto.Description}");
-                Console.WriteLine($"  ItemGroups   : {dto.ItemGroups?.Count() ?? 0} groupe(s)");
-                Console.WriteLine($"  Campaigns    : {dto.SelectedCampaignParams?.Count() ?? 0} campagne(s)");
-
                 const string insertTemplate = @"
                     INSERT INTO dbo.Ls_template
                         (Description, Min, Max, TypeId, ActiveMinMax, version, status,
@@ -119,8 +112,6 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
                     cmd.Parameters.AddWithValue("@PeriodeId",   dto.LsTemplatePeriodeId);
                     templateId = Convert.ToInt32(await cmd.ExecuteScalarAsync());
                 }
-
-                Console.WriteLine($"  ✅ Ls_template inséré → Id = {templateId}");
 
                 foreach (var group in dto.ItemGroups ?? Enumerable.Empty<ItemGroupDto>())
                 {
@@ -148,13 +139,11 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
                     await InsertCalledCampaignAsync(conn, tran, templateId, param, DateTime.Now, DateTime.Now.AddYears(1));
 
                 await tran.CommitAsync();
-                Console.WriteLine($"  ✅✅ COMMIT réussi — templateId = {templateId}");
                 return templateId;
             }
             catch (Exception ex)
             {
                 await tran.RollbackAsync();
-                Console.WriteLine($"  ❌ ROLLBACK : {ex.Message}");
                 throw;
             }
         }
@@ -166,7 +155,8 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             await using var tran = conn.BeginTransaction();
             try
             {
-                const string sql = @"
+                // ── 1. Update template header ─────────────────────────────
+                const string updateTmpl = @"
                     UPDATE dbo.Ls_template
                     SET Description = @Description, Min = @Min, Max = @Max,
                         StartDate = @StartDate, EndDate = @EndDate,
@@ -176,7 +166,7 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
                 var startDate = DateTime.TryParse(dto.StartDate, out var sd) ? sd : DateTime.Now;
                 var endDate   = DateTime.TryParse(dto.EndDate,   out var ed) ? ed : DateTime.Now.AddYears(1);
 
-                await using (var cmd = new SqlCommand(sql, conn, tran))
+                await using (var cmd = new SqlCommand(updateTmpl, conn, tran))
                 {
                     cmd.Parameters.AddWithValue("@Id",          id);
                     cmd.Parameters.AddWithValue("@Description", dto.Description);
@@ -188,18 +178,22 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
                     await cmd.ExecuteNonQueryAsync();
                 }
 
-                if (dto.ItemGroups != null && dto.ItemGroups.Any())
+                // ── 2. Replace groups + items (delete then re-insert) ─────
+                if (dto.ItemGroups != null)
                 {
+                    // Delete items first (FK constraint)
                     const string deleteItems = @"
                         DELETE i FROM dbo.Ls_templateItem i
                         INNER JOIN dbo.Ls_templateItemGroup g ON g.Id = i.GroupId
                         WHERE g.TemplateId = @TemplateId";
+
                     await using (var cmd = new SqlCommand(deleteItems, conn, tran))
                     {
                         cmd.Parameters.AddWithValue("@TemplateId", id);
                         await cmd.ExecuteNonQueryAsync();
                     }
 
+                    // Delete groups
                     const string deleteGroups = "DELETE FROM dbo.Ls_templateItemGroup WHERE TemplateId = @TemplateId";
                     await using (var cmd = new SqlCommand(deleteGroups, conn, tran))
                     {
@@ -207,6 +201,7 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
                         await cmd.ExecuteNonQueryAsync();
                     }
 
+                    // Re-insert groups + items
                     foreach (var group in dto.ItemGroups)
                     {
                         const string insertGroup = @"
@@ -230,8 +225,26 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
                     }
                 }
 
+                // ── 3. FIX: Replace campaigns (delete existing then re-insert) ──
+                // BUG original : les campagnes existantes n'étaient jamais supprimées,
+                // ce qui causait des doublons à chaque sauvegarde.
+                const string deleteCampaigns = @"
+                    DELETE FROM dbo.Ls_CalledCampaign
+                    WHERE IdLsTemplate = @TemplateId
+                      AND NOT EXISTS (
+                          SELECT 1 FROM dbo.Ls l WHERE l.CalledCampaignId = dbo.Ls_CalledCampaign.Id
+                      )";
+
+                await using (var cmd = new SqlCommand(deleteCampaigns, conn, tran))
+                {
+                    cmd.Parameters.AddWithValue("@TemplateId", id);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Re-insert selected campaigns with proper dates (not NULL)
+                // BUG original : startDate/endDate passés à null → SQL rejetait les valeurs
                 foreach (var param in dto.SelectedCampaignParams ?? Enumerable.Empty<string>())
-                    await InsertCalledCampaignAsync(conn, tran, id, param, null, null);
+                    await InsertCalledCampaignAsync(conn, tran, id, param, startDate, endDate);
 
                 await tran.CommitAsync();
             }
@@ -281,6 +294,7 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
                         }
                     }
                 }
+
                 const string deleteSql = "DELETE FROM dbo.Ls_template WHERE Id = @Id";
                 await using (var cmd = new SqlCommand(deleteSql, conn, tran))
                 {
@@ -426,7 +440,6 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
 
         public async Task<IEnumerable<ItemGroupDto>> GetItemGroupsByTemplateAsync(int templateId)
         {
-            // ✅ Question ajouté dans le SELECT
             const string sql = @"
                 SELECT g.Id, g.Description, g.Coef, g.[Order],
                        i.Id AS ItemId, i.Description AS ItemDesc,
@@ -456,18 +469,17 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
 
                 if (!reader.IsDBNull(4))
                 {
-                    // ✅ Index décalés de +1 après Question (colonne 6)
                     groups[gId].items.Add(new TemplateItemDto(
-                        reader.GetInt32(4),                                       // Id
-                        reader.IsDBNull(5) ? string.Empty : reader.GetString(5), // Description
-                        reader.IsDBNull(6) ? null : reader.GetString(6),          // Question ✅
-                        reader.GetInt32(7),                                       // Min
-                        reader.GetInt32(8),                                       // Max
-                        reader.GetInt32(9),                                       // Coef
-                        reader.GetInt32(10),                                      // Order
-                        reader.GetInt32(11),                                      // IsNa
-                        reader.GetInt32(12),                                      // IsKillerQuestion
-                        reader.GetInt32(13)));                                    // IsKillerSection
+                        reader.GetInt32(4),
+                        reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                        reader.IsDBNull(6) ? null         : reader.GetString(6),
+                        reader.GetInt32(7),
+                        reader.GetInt32(8),
+                        reader.GetInt32(9),
+                        reader.GetInt32(10),
+                        reader.GetInt32(11),
+                        reader.GetInt32(12),
+                        reader.GetInt32(13)));
                 }
             }
             return groups.Values.Select(v => v.group);
@@ -521,7 +533,6 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
 
         public async Task<IEnumerable<TemplateItemDto>> GetItemsByGroupAsync(int groupId)
         {
-            // ✅ Question ajouté dans le SELECT
             const string sql = @"
                 SELECT Id, Description, Question, Min, Max, Coef, [Order],
                        is_NA, is_killer_question, is_killer_section
@@ -537,22 +548,21 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
                 list.Add(new TemplateItemDto(
-                    reader.GetInt32(0),                                       // Id
-                    reader.IsDBNull(1) ? string.Empty : reader.GetString(1), // Description
-                    reader.IsDBNull(2) ? null : reader.GetString(2),          // Question ✅
-                    reader.GetInt32(3),                                       // Min
-                    reader.GetInt32(4),                                       // Max
-                    reader.GetInt32(5),                                       // Coef
-                    reader.GetInt32(6),                                       // Order
-                    reader.GetInt32(7),                                       // IsNa
-                    reader.GetInt32(8),                                       // IsKillerQuestion
-                    reader.GetInt32(9)));                                     // IsKillerSection
+                    reader.GetInt32(0),
+                    reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    reader.IsDBNull(2) ? null         : reader.GetString(2),
+                    reader.GetInt32(3),
+                    reader.GetInt32(4),
+                    reader.GetInt32(5),
+                    reader.GetInt32(6),
+                    reader.GetInt32(7),
+                    reader.GetInt32(8),
+                    reader.GetInt32(9)));
             return list;
         }
 
         public async Task<int> CreateTemplateItemAsync(CreateTemplateItemDto dto)
         {
-            // ✅ Question ajouté dans INSERT
             const string sql = @"
                 INSERT INTO dbo.Ls_templateItem
                     (Description, Question, Min, Max, Coef, [Order],
@@ -566,7 +576,7 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             await conn.OpenAsync();
             await using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@Desc",      dto.Description);
-            cmd.Parameters.AddWithValue("@Question",  (object?)dto.Question ?? DBNull.Value); // ✅
+            cmd.Parameters.AddWithValue("@Question",  (object?)dto.Question ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Min",       dto.Min);
             cmd.Parameters.AddWithValue("@Max",       dto.Max);
             cmd.Parameters.AddWithValue("@Coef",      dto.Coef);
@@ -580,7 +590,6 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
 
         public async Task UpdateTemplateItemAsync(int id, UpdateTemplateItemDto dto)
         {
-            // ✅ Question ajouté dans UPDATE
             const string sql = @"
                 UPDATE dbo.Ls_templateItem
                 SET Description        = @Desc,
@@ -600,7 +609,7 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             await using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@Id",        id);
             cmd.Parameters.AddWithValue("@Desc",      dto.Description);
-            cmd.Parameters.AddWithValue("@Question",  (object?)dto.Question ?? DBNull.Value); // ✅
+            cmd.Parameters.AddWithValue("@Question",  (object?)dto.Question ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Min",       dto.Min);
             cmd.Parameters.AddWithValue("@Max",       dto.Max);
             cmd.Parameters.AddWithValue("@Coef",      dto.Coef);
@@ -680,9 +689,9 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             await conn.OpenAsync();
             await using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@Desc",       campDesc);
+            cmd.Parameters.AddWithValue("@CampDesc",   campDesc);
             cmd.Parameters.AddWithValue("@Site",       site);
             cmd.Parameters.AddWithValue("@Did",        did);
-            cmd.Parameters.AddWithValue("@CampDesc",   campDesc);
             cmd.Parameters.AddWithValue("@Status",     dto.Status);
             cmd.Parameters.AddWithValue("@TemplateId", dto.LsTemplateId);
             return Convert.ToInt32(await cmd.ExecuteScalarAsync());
@@ -744,7 +753,8 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
         // LOOKUPS
         // ════════════════════════════════════════════════════════════════════
 
-        public async Task<IEnumerable<AvailableCampaignDto>> GetAvailableCampaignsBySiteAsync(int customerId, int? templateId = null)
+        public async Task<IEnumerable<AvailableCampaignDto>> GetAvailableCampaignsBySiteAsync(
+            int customerId, int? templateId = null)
         {
             const string sql = @"
                 SELECT Description AS DESCRIP,
@@ -770,20 +780,29 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             return list;
         }
 
-        public async Task<IEnumerable<AvailableCampaignDto>> GetAvailableCampaignsAsync(int? excludeTemplateId = null)
+        // FIX: excludeTemplateId était ignoré dans la requête SQL
+        public async Task<IEnumerable<AvailableCampaignDto>> GetAvailableCampaignsAsync(
+            int? excludeTemplateId = null)
         {
+            // BUG original : le paramètre excludeTemplateId était déclaré mais jamais utilisé
+            // dans le WHERE, ce qui retournait toutes les campagnes sans filtrage par template.
             const string sql = @"
                 SELECT (customer + ' - ' + Description) AS DESCRIP,
                        (CONVERT(VARCHAR, customerId) + ',' + DID + ',' + Description) AS Param
                 FROM dbo.tListCampaigns
                 WHERE Description IS NOT NULL
-                  AND DID NOT IN (SELECT CampagneDID FROM dbo.Ls_CalledCampaign WHERE CampagneDID IS NOT NULL)
+                  AND DID NOT IN (
+                      SELECT CampagneDID FROM dbo.Ls_CalledCampaign
+                      WHERE CampagneDID IS NOT NULL
+                        AND (@ExcludeTemplateId IS NULL OR IdLsTemplate <> @ExcludeTemplateId)
+                  )
                 ORDER BY DESCRIP";
 
             var list = new List<AvailableCampaignDto>();
             await using var conn = OpenConnection();
             await conn.OpenAsync();
             await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@ExcludeTemplateId", (object?)excludeTemplateId ?? DBNull.Value);
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
                 list.Add(new AvailableCampaignDto(reader.GetString(0), reader.GetString(1)));
@@ -839,7 +858,6 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             r.IsDBNull(10) ? null : r.GetString(10)
         );
 
-        // ✅ Question ajouté dans INSERT
         private static async Task InsertTemplateItemAsync(
             SqlConnection conn, SqlTransaction tran,
             TemplateItemDto item, int groupId)
@@ -854,7 +872,7 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
 
             await using var cmd = new SqlCommand(sql, conn, tran);
             cmd.Parameters.AddWithValue("@Desc",      item.Description);
-            cmd.Parameters.AddWithValue("@Question",  (object?)item.Question ?? DBNull.Value); // ✅
+            cmd.Parameters.AddWithValue("@Question",  (object?)item.Question ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Min",       item.Min);
             cmd.Parameters.AddWithValue("@Max",       item.Max);
             cmd.Parameters.AddWithValue("@Coef",      item.Coef);
@@ -866,6 +884,8 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // FIX: startDate/endDate ne peuvent pas être null — SQL Server rejette
+        // les colonnes datetime NOT NULL avec DBNull. On utilise des valeurs par défaut.
         private static async Task InsertCalledCampaignAsync(
             SqlConnection conn, SqlTransaction tran,
             int templateId, string param,
@@ -888,8 +908,9 @@ namespace scoring_Backend.Repositories.Implementations.Configuration
             cmd.Parameters.AddWithValue("@Site",       site);
             cmd.Parameters.AddWithValue("@Did",        did);
             cmd.Parameters.AddWithValue("@CampDesc",   campDesc);
-            cmd.Parameters.AddWithValue("@Start",      (object?)(startDate ?? DateTime.Now));
-            cmd.Parameters.AddWithValue("@End",        (object?)(endDate   ?? DateTime.Now.AddYears(1)));
+            // Valeurs par défaut si null — évite les erreurs SQL NOT NULL
+            cmd.Parameters.AddWithValue("@Start",      startDate ?? DateTime.Now);
+            cmd.Parameters.AddWithValue("@End",        endDate   ?? DateTime.Now.AddYears(1));
             cmd.Parameters.AddWithValue("@TemplateId", templateId);
             await cmd.ExecuteNonQueryAsync();
         }

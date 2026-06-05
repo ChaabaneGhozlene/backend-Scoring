@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens; // ✅ Ajouter
 using System.Text;
+
+
 using Microsoft.AspNetCore.Authentication.JwtBearer; // ✅ Ajouter cette ligne
 using scoring_Backend.Models.Admin;
 using scoring_Backend.Repositories.Interfaces;
@@ -14,13 +16,15 @@ using scoring_Backend.Repositories.Interfaces.Configuration;
 using scoring_Backend.Repositories.Implementations.Configuration;
 using scoring_Backend.Repositories.Interfaces.Statistique;
 using scoring_Backend.Repositories.Implementations.Statistique;
+using scoring_Backend.Repositories.Interfaces.Dashboard;
+using scoring_Backend.Repositories.Implementations.Dashboard;
 
 IdentityModelEventSource.ShowPII = true;
 var builder = WebApplication.CreateBuilder(args);
-/*builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpContextAccessor();
 
 // Session (équivalent HttpContext.Current.Session de l'ancien code)
-builder.Services.AddDistributedMemoryCache();
+/*builder.Services.AddDistributedMemoryCache();
 builder.Services.AddSession(options =>
 {
     options.IdleTimeout = TimeSpan.FromMinutes(30);
@@ -85,7 +89,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 };
     });
 // 🔹 Ajouter Controllers
-builder.Services.AddControllers();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<JwtService>();
 
@@ -94,10 +97,6 @@ builder.Services.AddScoped<JwtService>();
 builder.Services.AddDbContext<SqrAdminContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("SqrAdmin")));
-builder.Services.AddDbContext<SqrScoringContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("SqrScoring")));
-
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -114,6 +113,12 @@ builder.Services.AddScoped<IEvaluationRepository, EvaluationRepository>();
 // Ajouter avec vos autres services
 builder.Services.AddScoped<IUserDashboardRepository, UserDashboardRepository>();
 builder.Services.AddScoped<IStatistiqueRepository2,StatistiqueRepository2>();
+builder.Services.AddScoped<IDashboardRepository, DashboardRepository>();
+builder.Services.AddHttpClient<ITranscriptionRepository, TranscriptionRepository>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["PythonApi:BaseUrl"]!);
+    client.Timeout     = TimeSpan.FromMinutes(30);
+});
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -124,7 +129,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend", policy =>
         policy.WithOrigins("http://localhost:5173")
               .AllowAnyHeader()
-              .AllowAnyMethod());
+              .AllowAnyMethod()
+              .AllowCredentials());
 });
 builder.Services.AddDbContext<SqrScoringContext>(options =>
     options

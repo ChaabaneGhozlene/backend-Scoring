@@ -128,4 +128,6 @@ public partial class RecordDatum
     public string? RecFilenameTmp { get; set; }
 
     public string? RecDateLocal { get; set; }
+    public string? Transcript { get; set; }
+    public string? DetectedLang { get; set; }  
 }
